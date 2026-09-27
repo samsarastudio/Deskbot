@@ -334,7 +334,7 @@ void sync_proto_on_message(const uint8_t *data, size_t len)
             session_sm_on_sync_done();
         }
     } else if (!strcmp(type->valuestring, "FACTORY_RESET")) {
-        if (s_authed || !ownership_get()->registered) {
+        if (s_authed || !ownership_get()->registered || session_sm_get() == SM_RECOVERY) {
             ownership_clear();
             sync_proto_reset_session();
             session_sm_on_factory_reset();
@@ -371,6 +371,13 @@ void sync_proto_on_session_control(const char *json)
         cJSON *hint = cJSON_CreateObject();
         cJSON_AddStringToObject(hint, "code", ownership_confirm_code());
         send_type("UI_HINT", hint);
+    } else if (cJSON_IsString(op) && !strcmp(op->valuestring, "factory_reset")) {
+        /* Allowed without auth so recovery can always clear a bad ownership token. */
+        ownership_clear();
+        sync_proto_reset_session();
+        session_sm_on_factory_reset();
+        face_set_ble_status("Open app", "curious", ownership_confirm_code());
+        send_ack(NULL, true);
     }
     cJSON_Delete(root);
 }

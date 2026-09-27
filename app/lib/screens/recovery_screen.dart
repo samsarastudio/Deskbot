@@ -34,19 +34,28 @@ class RecoveryScreen extends ConsumerWidget {
                 ),
                 const Spacer(),
                 NovaPrimaryButton(
-                  label: 'Try again',
-                  onPressed: () => ref.read(bleControllerProvider.notifier).startScan(
-                        autoConnectRegistered: s.registered != null,
-                      ),
+                  label: 'Factory reset Deskbot',
+                  onPressed: () async {
+                    // Scan+connect first if needed so session char is available.
+                    if (s.phase == BleLinkPhase.recovery || s.registered != null) {
+                      await ref.read(bleControllerProvider.notifier).startScan(
+                            autoConnectRegistered: true,
+                          );
+                      await Future<void>.delayed(const Duration(seconds: 3));
+                    }
+                    await ref.read(bleControllerProvider.notifier).factoryResetRemote();
+                  },
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton(
-                  onPressed: () {},
-                  child: const Text('Check Bluetooth'),
+                  onPressed: () => ref.read(bleControllerProvider.notifier).startScan(
+                        autoConnectRegistered: s.registered != null,
+                      ),
+                  child: const Text('Try again'),
                 ),
                 TextButton(
                   onPressed: () => ref.read(bleControllerProvider.notifier).removeDeskbot(),
-                  child: Text('Re-register / Remove', style: text.bodyMedium?.copyWith(color: NovaColors.bad)),
+                  child: Text('Remove from phone only', style: text.bodyMedium?.copyWith(color: NovaColors.muted)),
                 ),
               ],
             ),

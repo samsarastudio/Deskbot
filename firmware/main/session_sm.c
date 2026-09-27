@@ -14,7 +14,7 @@ static void apply_ui(session_state_t state)
         face_set_ble_status("Open app", "curious", ownership_confirm_code());
         break;
     case SM_REGISTERED_OFFLINE:
-        face_set_ble_status(NULL, NULL, NULL); /* normal face, away pip */
+        face_set_ble_status(NULL, NULL, NULL);
         face_set_ble_pip(false);
         face_set_state(FACE_IDLE);
         break;
@@ -33,7 +33,7 @@ static void apply_ui(session_state_t state)
         face_set_ble_pip(true);
         break;
     case SM_RECOVERY:
-        face_set_ble_status("Open app", "worried", NULL);
+        face_set_ble_status("Auth fail", "worried", NULL);
         break;
     }
 }

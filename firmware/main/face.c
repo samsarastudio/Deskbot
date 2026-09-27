@@ -580,26 +580,67 @@ static void draw_ble_pip(bool connected)
     lcd_fill_circle(x, y, 4, c);
 }
 
+/** Soft cyan-ice status screen — setup / linking / recovery. */
+static void draw_ble_status_scene(void)
+{
+    float t = esp_timer_get_time() / 1000000.0f;
+    float breath = 0.5f + 0.5f * sinf(t * 1.35f);
+    float sway = sinf(t * 0.9f) * 3.0f;
+
+    /* Ambient blobs */
+    int bx = (int)(40 + sway * 2.0f);
+    int by = (int)(30 + breath * 6.0f);
+    lcd_fill_circle(bx, by, (int)(28 + breath * 4.0f), RGB565(18, 42, 58));
+    lcd_fill_circle(DESKBOT_LCD_WIDTH - 36, DESKBOT_LCD_HEIGHT - 40,
+                    (int)(34 + (1.0f - breath) * 5.0f), RGB565(28, 36, 22));
+    lcd_fill_circle(DESKBOT_LCD_WIDTH / 2, DESKBOT_LCD_HEIGHT - 18,
+                    (int)(22 + breath * 3.0f), RGB565(40, 24, 36));
+
+    /* Brand */
+    draw_centered_fast(6, 1, COL_ACCENT, "NOVA");
+
+    /* Floating soft face */
+    draw_smiley();
+
+    /* Glass panel for status */
+    int panel_y = 96;
+    int panel_h = s_ble_code[0] ? 68 : 44;
+    lcd_fill_round_rect(14, panel_y, DESKBOT_LCD_WIDTH - 28, panel_h, 14, RGB565(16, 28, 40));
+    lcd_fill_round_rect(16, panel_y + 2, DESKBOT_LCD_WIDTH - 32, panel_h - 4, 12, RGB565(20, 34, 48));
+
+    const char *label = s_ble_label[0] ? s_ble_label : "…";
+    draw_centered_fast(panel_y + 10, 2, COL_FACE, label);
+
+    if (s_ble_code[0]) {
+        /* Spaced gold code */
+        char spaced[16];
+        size_t n = 0;
+        for (const char *p = s_ble_code; *p && n + 2 < sizeof(spaced); p++) {
+            if (n) {
+                spaced[n++] = ' ';
+            }
+            spaced[n++] = *p;
+        }
+        spaced[n] = 0;
+        draw_centered_fast(panel_y + 34, 3, COL_GOLD, spaced);
+    }
+
+    /* Soft breath ring around bottom */
+    int ring_r = (int)(6 + breath * 3.0f);
+    lcd_draw_ring(DESKBOT_LCD_WIDTH / 2, DESKBOT_LCD_HEIGHT - 10, ring_r + 2, ring_r, COL_ACCENT);
+}
+
 static void draw_teleprompter(void)
 {
     uint16_t ink = COL_FACE;
     draw_smiley();
 
     const char *body = s_chat_nova[0] ? s_chat_nova : s_chat_user;
-    if (s_ble_status && s_ble_label[0]) {
-        body = s_ble_label;
-    }
     if (s_intro && !s_chat_nova[0] && !s_ble_status) {
         body = "That's me!";
     }
     if (!body || !body[0]) {
         body = "hi!";
-    }
-    if (s_ble_status && s_ble_code[0]) {
-        char combo[48];
-        snprintf(combo, sizeof(combo), "%s %s", s_ble_label[0] ? s_ble_label : "CODE", s_ble_code);
-        ascii_clip(s_chat_nova, sizeof(s_chat_nova), combo);
-        body = s_chat_nova;
     }
     char lines[PROMPT_MAX_LINES][PROMPT_COLS + 1];
     int n = wrap_prompt(body, lines, PROMPT_MAX_LINES);
@@ -643,9 +684,29 @@ static void draw_teleprompter(void)
     }
 }
 
+static void draw_ambient_fluid(void)
+{
+    float t = esp_timer_get_time() / 1000000.0f;
+    float a = 0.5f + 0.5f * sinf(t * 0.85f);
+    float b = 0.5f + 0.5f * sinf(t * 1.1f + 1.2f);
+    lcd_fill_circle((int)(28 + a * 10.0f), (int)(24 + b * 8.0f),
+                    (int)(22 + a * 4.0f), RGB565(14, 32, 44));
+    lcd_fill_circle((int)(DESKBOT_LCD_WIDTH - 30 - b * 8.0f), (int)(48 + a * 10.0f),
+                    (int)(26 + b * 5.0f), RGB565(22, 28, 18));
+    lcd_fill_circle(DESKBOT_LCD_WIDTH / 2, DESKBOT_LCD_HEIGHT - 12,
+                    (int)(18 + a * 3.0f), RGB565(30, 20, 34));
+}
+
 static void render_locked(void)
 {
     lcd_fill(COL_BG);
+
+    if (s_ble_status) {
+        draw_ble_status_scene();
+        return;
+    }
+
+    draw_ambient_fluid();
 
     const char *label = state_label(s_state);
     if (prompt_active()) {
@@ -762,14 +823,28 @@ static void render_task(void *arg)
         xSemaphoreTake(s_lock, portMAX_DELAY);
         bool heart = s_heart;
         bool prompting = prompt_active();
-        bool want_blink = !heart && !prompting && (now_us >= s_next_blink_us) && (s_state != FACE_SLEEP);
-        bool full = s_dirty || (minute_key != last_minute) || heart;
-        if (prompting && !full) {
+        bool ble_ui = s_ble_status;
+        bool want_blink = !heart && !prompting && !ble_ui && (now_us >= s_next_blink_us) && (s_state != FACE_SLEEP);
+        bool full = s_dirty || (minute_key != last_minute) || heart || ble_ui;
+        if (prompting && !full && !ble_ui) {
             /* Gentle teleprompter scroll — not 30fps full-screen SPI. */
             static int64_t last_prompt_us;
             if (now_us - last_prompt_us > 180000) {
                 full = true;
                 last_prompt_us = now_us;
+            }
+        }
+        if (ble_ui) {
+            static int64_t last_ble_us;
+            if (now_us - last_ble_us > 50000) { /* ~20fps soft motion */
+                full = true;
+                last_ble_us = now_us;
+            }
+        } else if (!heart && !prompting) {
+            static int64_t last_ambient_us;
+            if (now_us - last_ambient_us > 120000) { /* ~8fps ambient blobs */
+                full = true;
+                last_ambient_us = now_us;
             }
         }
         if (full) {
@@ -791,6 +866,9 @@ static void render_task(void *arg)
         xSemaphoreGive(s_lock);
         if (heart) {
             vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(33));
+        } else if (ble_ui) {
+            last_wake = xTaskGetTickCount();
+            vTaskDelay(pdMS_TO_TICKS(50));
         } else if (prompting) {
             last_wake = xTaskGetTickCount();
             vTaskDelay(pdMS_TO_TICKS(80));

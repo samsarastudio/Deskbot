@@ -447,7 +447,18 @@ class BleController extends StateNotifier<BleUiState> {
   }
 
   Future<void> factoryResetRemote() async {
-    await _writeJson(envelopeJson('FACTORY_RESET', {}));
+    try {
+      // Works even when auth failed — desk accepts this in recovery.
+      await _session?.write(
+        utf8.encode(jsonEncode({'op': 'factory_reset'})),
+        withoutResponse: false,
+      );
+    } catch (_) {
+      try {
+        await _writeJson(envelopeJson('FACTORY_RESET', {}));
+      } catch (_) {}
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 400));
     await removeDeskbot();
   }
 
