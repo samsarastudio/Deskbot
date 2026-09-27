@@ -1,17 +1,14 @@
 # Codemagic CI — NOVA Deskbot companion
-# Repo root contains firmware + app/; Flutter project lives in app/
+# Flutter project lives in app/
 # Free personal accounts: 500 macOS M2 minutes/month
 #
 # iOS workflow builds an unsigned IPA for Sideloadly (Windows re-signs with free Apple ID).
-# No Apple Developer ($99) certs required for this path.
 
 workflows:
   ios-sideload-test:
     name: iOS Sideload IPA (unsigned)
     max_build_duration: 60
     instance_type: mac_mini_m2
-    integrations:
-      app_store_connect: null
     environment:
       flutter: stable
       xcode: latest
@@ -31,7 +28,6 @@ workflows:
           set -e
           APP_PATH="$APP_DIR/build/ios/iphoneos/Runner.app"
           if [ ! -d "$APP_PATH" ]; then
-            # Newer Flutter layouts
             APP_PATH="$(find "$APP_DIR/build/ios" -name 'Runner.app' -type d | head -n1)"
           fi
           echo "Using app: $APP_PATH"
@@ -44,7 +40,6 @@ workflows:
           ls -lh "$CM_BUILD_DIR/NOVA-ios-unsigned.ipa"
     artifacts:
       - NOVA-ios-unsigned.ipa
-      - app/build/ios/iphoneos/*.app
 
   android-debug-test:
     name: Android Debug APK
