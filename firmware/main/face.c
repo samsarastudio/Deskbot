@@ -659,13 +659,12 @@ static void draw_scenery_bg(void)
 
 static void draw_notify_scene(void)
 {
-    draw_scenery_bg();
-    draw_smiley();
-    int panel_y = 88;
-    lcd_fill_round_rect(10, panel_y, DESKBOT_LCD_WIDTH - 20, 72, 14, RGB565(12, 22, 34));
-    lcd_fill_round_rect(12, panel_y + 2, DESKBOT_LCD_WIDTH - 24, 68, 12, RGB565(18, 30, 44));
-    draw_centered_fast(panel_y + 8, 1, COL_ACCENT, s_notify_title[0] ? s_notify_title : "Alert");
-    draw_centered_fast(panel_y + 28, 2, COL_FACE, s_notify_body[0] ? s_notify_body : "");
+    /* Fast path: flat panel + text only (no neon face / scenery blit). */
+    lcd_fill(COL_BG);
+    lcd_fill_round_rect(8, 40, DESKBOT_LCD_WIDTH - 16, 100, 12, RGB565(14, 26, 38));
+    lcd_fill_round_rect(10, 42, DESKBOT_LCD_WIDTH - 20, 96, 10, RGB565(18, 32, 46));
+    draw_centered_fast(56, 1, COL_ACCENT, s_notify_title[0] ? s_notify_title : "Alert");
+    draw_centered_fast(84, 2, COL_FACE, s_notify_body[0] ? s_notify_body : "");
 }
 
 static void draw_calendar_strip(void)
@@ -897,25 +896,24 @@ static void render_task(void *arg)
             s_dirty = true;
         }
         bool want_blink = !heart && !prompting && !ble_ui && !notify_ui && (now_us >= s_next_blink_us) && (s_state != FACE_SLEEP);
-        bool full = s_dirty || (minute_key != last_minute) || heart || ble_ui || notify_ui;
-        if (prompting && !full && !ble_ui && !notify_ui) {
-            /* Gentle teleprompter scroll — not 30fps full-screen SPI. */
+        /* Notify is static — only redraw when dirty, never in an animation loop. */
+        bool full = s_dirty || (minute_key != last_minute) || heart || ble_ui;
+        if (prompting && !full && !ble_ui) {
             static int64_t last_prompt_us;
-            if (now_us - last_prompt_us > 180000) {
+            if (now_us - last_prompt_us > 220000) {
                 full = true;
                 last_prompt_us = now_us;
             }
         }
-        if (ble_ui || notify_ui) {
+        if (ble_ui) {
             static int64_t last_ble_us;
-            if (now_us - last_ble_us > 125000) { /* ~8fps status/notify */
+            if (now_us - last_ble_us > 200000) { /* ~5fps setup UI */
                 full = true;
                 last_ble_us = now_us;
             }
-        } else if (!heart && !prompting && !s_scenery_ready) {
-            /* Soft ambient only when no photo bg — and rarely. */
+        } else if (!heart && !prompting && !notify_ui && !s_scenery_ready) {
             static int64_t last_ambient_us;
-            if (now_us - last_ambient_us > 2000000) {
+            if (now_us - last_ambient_us > 3000000) {
                 full = true;
                 last_ambient_us = now_us;
             }
@@ -930,7 +928,7 @@ static void render_task(void *arg)
             s_blink = true;
             present(false);
             xSemaphoreGive(s_lock);
-            vTaskDelay(pdMS_TO_TICKS(120));
+            vTaskDelay(pdMS_TO_TICKS(100));
             xSemaphoreTake(s_lock, portMAX_DELAY);
             s_blink = false;
             present(false);
@@ -938,16 +936,16 @@ static void render_task(void *arg)
         }
         xSemaphoreGive(s_lock);
         if (heart) {
-            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(33));
-        } else if (ble_ui || notify_ui) {
-            last_wake = xTaskGetTickCount();
-            vTaskDelay(pdMS_TO_TICKS(100));
-        } else if (prompting) {
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(40));
+        } else if (ble_ui) {
             last_wake = xTaskGetTickCount();
             vTaskDelay(pdMS_TO_TICKS(120));
-        } else {
+        } else if (prompting) {
             last_wake = xTaskGetTickCount();
             vTaskDelay(pdMS_TO_TICKS(150));
+        } else {
+            last_wake = xTaskGetTickCount();
+            vTaskDelay(pdMS_TO_TICKS(200));
         }
     }
 }
@@ -1164,20 +1162,18 @@ void face_set_ble_pip(bool connected)
 
 void face_show_notify(const char *title, const char *body, const char *mood, int ttl_ms)
 {
+    (void)mood; /* keep expression stable — mood changes force heavy redraws */
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_notify_on = true;
     ascii_clip(s_notify_title, sizeof(s_notify_title), title ? title : "Alert");
     ascii_clip(s_notify_body, sizeof(s_notify_body), body ? body : "");
     if (ttl_ms <= 0) {
-        ttl_ms = 8000;
+        ttl_ms = 5000;
     }
     s_notify_until = esp_timer_get_time() + (int64_t)ttl_ms * 1000;
     s_dirty = true;
     xSemaphoreGive(s_lock);
-    if (mood) {
-        face_set_expression(mood, 0.85f);
-    }
-    rgb(20, 36, 48);
+    rgb(16, 28, 40);
 }
 
 void face_clear_notify(void)
@@ -1211,8 +1207,8 @@ void face_clear_calendar(void)
 
 bool face_scenery_begin(int w, int h)
 {
-    /* Keep small — C6 SRAM is tight after the 110KB framebuffer. */
-    if (w < 8 || h < 8 || w > 96 || h > 52) {
+    /* Pixel-art sized only — ~1KB so one BLE frame is enough. */
+    if (w < 8 || h < 8 || w > 40 || h > 24) {
         ESP_LOGW(TAG, "scenery size rejected %dx%d", w, h);
         return false;
     }

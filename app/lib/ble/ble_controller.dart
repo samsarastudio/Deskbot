@@ -144,6 +144,24 @@ class BleController extends StateNotifier<BleUiState> {
     await startScan(autoConnectRegistered: true);
   }
 
+  Future<void> onAppBackgrounded() async {
+    if (state.registered == null) return;
+    _reconnectIntent = true;
+    await NovaKeepAlive.start(
+      status: state.phase == BleLinkPhase.connected ? 'Connected to NOVA' : 'Keeping NOVA nearby',
+    );
+  }
+
+  Future<void> onAppResumed() async {
+    if (state.registered == null) return;
+    _reconnectIntent = true;
+    await NovaKeepAlive.start(status: 'Looking after NOVA');
+    await _ensureLinkFromBackground();
+    if (state.phase == BleLinkPhase.connected) {
+      await _mirror?.refreshCalendar();
+    }
+  }
+
   Future<void> startScan({bool autoConnectRegistered = false}) async {
     if (_connecting) return;
     state = state.copyWith(

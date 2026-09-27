@@ -215,7 +215,7 @@ static void handle_display(cJSON *body)
             cJSON_IsString(title) ? title->valuestring : "Alert",
             cJSON_IsString(text) ? text->valuestring : "",
             cJSON_IsString(mood) ? mood->valuestring : "curious",
-            cJSON_IsNumber(ttl) ? (int)ttl->valuedouble : 8000);
+            cJSON_IsNumber(ttl) ? (int)ttl->valuedouble : 5000);
         send_ack(NULL, true);
     } else if (!strcmp(op->valuestring, "notify_clear")) {
         face_clear_notify();
@@ -248,6 +248,36 @@ static void handle_display(cJSON *body)
                                  cJSON_IsString(tz) ? tz->valuestring : NULL);
         }
         send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "scenery")) {
+        /* One-shot tiny pixel-art payload (preferred). */
+        const cJSON *w = cJSON_GetObjectItem(body, "w");
+        const cJSON *h = cJSON_GetObjectItem(body, "h");
+        const cJSON *data = cJSON_GetObjectItem(body, "data");
+        int wi = cJSON_IsNumber(w) ? (int)w->valuedouble : 0;
+        int hi = cJSON_IsNumber(h) ? (int)h->valuedouble : 0;
+        if (!cJSON_IsString(data) || !data->valuestring || !face_scenery_begin(wi, hi)) {
+            send_ack(NULL, false);
+            return;
+        }
+        size_t b64_len = strlen(data->valuestring);
+        size_t olen = (b64_len / 4) * 3 + 4;
+        uint8_t *buf = malloc(olen);
+        if (!buf) {
+            face_scenery_clear();
+            send_ack(NULL, false);
+            return;
+        }
+        size_t written = 0;
+        int rc = mbedtls_base64_decode(buf, olen, &written,
+                                       (const unsigned char *)data->valuestring, b64_len);
+        bool ok = (rc == 0) && face_scenery_write(0, buf, written);
+        free(buf);
+        if (ok) {
+            face_scenery_commit();
+        } else {
+            face_scenery_clear();
+        }
+        send_ack(NULL, ok);
     } else if (!strcmp(op->valuestring, "scenery_begin")) {
         const cJSON *w = cJSON_GetObjectItem(body, "w");
         const cJSON *h = cJSON_GetObjectItem(body, "h");

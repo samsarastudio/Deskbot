@@ -76,7 +76,7 @@ class SyncEngine {
     try {
       await sendJson(envelopeJson('DISPLAY', body));
       return await _displayAck!.future.timeout(
-        const Duration(seconds: 4),
+        const Duration(seconds: 2),
         onTimeout: () => false,
       );
     } finally {
@@ -119,27 +119,16 @@ class SyncEngine {
     if (!authed) {
       throw StateError('Not linked — reconnect first');
     }
-    final began = await sendDisplayWait({'op': 'scenery_begin', 'w': w, 'h': h, 'fmt': 'rgb565'});
-    if (!began) {
-      throw StateError('Deskbot rejected scenery (out of RAM?)');
-    }
-    const chunk = 480;
-    for (var off = 0; off < pixels.length; off += chunk) {
-      final end = (off + chunk).clamp(0, pixels.length);
-      final slice = pixels.sublist(off, end);
-      final ok = await sendDisplayWait({
-        'op': 'scenery_chunk',
-        'off': off,
-        'data': base64Encode(slice),
-      });
-      if (!ok) {
-        throw StateError('Scenery upload failed at byte $off');
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 60));
-    }
-    final ended = await sendDisplayWait({'op': 'scenery_end'});
-    if (!ended) {
-      throw StateError('Scenery commit failed');
+    // One-shot pixel-art payload (~1KB) — no multi-chunk wait that can hang.
+    final ok = await sendDisplayWait({
+      'op': 'scenery',
+      'w': w,
+      'h': h,
+      'fmt': 'rgb565',
+      'data': base64Encode(pixels),
+    });
+    if (!ok) {
+      throw StateError('Deskbot rejected scenery');
     }
   }
 

@@ -2,23 +2,38 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
-/// Encode a photo into compact RGB565 for Deskbot scenery (96×52 ≈ 10KB RAM).
-Uint8List encodeSceneryRgb565(Uint8List bytes, {int maxW = 96, int maxH = 52}) {
+/// Tiny pixel-art scenery for Deskbot (~1.1KB) — fits in one BLE DISPLAY message.
+const int kSceneryW = 32;
+const int kSceneryH = 18;
+
+Uint8List encodeSceneryRgb565(
+  Uint8List bytes, {
+  int maxW = kSceneryW,
+  int maxH = kSceneryH,
+}) {
   final decoded = img.decodeImage(bytes);
   if (decoded == null) {
     throw StateError('Could not decode image');
   }
-  final resized = img.copyResize(
+
+  // Downsample with nearest-neighbor → chunky pixel look, then light palette.
+  var small = img.copyResize(
     decoded,
     width: maxW,
     height: maxH,
-    interpolation: img.Interpolation.average,
+    interpolation: img.Interpolation.nearest,
   );
-  final out = Uint8List(resized.width * resized.height * 2);
+  try {
+    small = img.quantize(small, numberOfColors: 16);
+  } catch (_) {
+    // quantize optional — nearest resize alone is fine
+  }
+
+  final out = Uint8List(small.width * small.height * 2);
   var i = 0;
-  for (var y = 0; y < resized.height; y++) {
-    for (var x = 0; x < resized.width; x++) {
-      final p = resized.getPixel(x, y);
+  for (var y = 0; y < small.height; y++) {
+    for (var x = 0; x < small.width; x++) {
+      final p = small.getPixel(x, y);
       final r = p.r.toInt() & 0xff;
       final g = p.g.toInt() & 0xff;
       final b = p.b.toInt() & 0xff;
@@ -30,4 +45,4 @@ Uint8List encodeSceneryRgb565(Uint8List bytes, {int maxW = 96, int maxH = 52}) {
   return out;
 }
 
-({int w, int h}) scenerySize() => (w: 96, h: 52);
+({int w, int h}) scenerySize() => (w: kSceneryW, h: kSceneryH);

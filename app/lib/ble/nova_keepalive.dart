@@ -32,7 +32,7 @@ class NovaKeepAlive {
       ),
       foregroundTaskOptions: ForegroundTaskOptions(
         // Slow heartbeat — low energy; main isolate does actual BLE reconnect.
-        eventAction: ForegroundTaskEventAction.repeat(20000),
+        eventAction: ForegroundTaskEventAction.repeat(8000),
         autoRunOnBoot: true,
         autoRunOnMyPackageReplaced: true,
         allowWakeLock: true,
