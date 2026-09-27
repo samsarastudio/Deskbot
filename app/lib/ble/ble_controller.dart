@@ -287,9 +287,14 @@ class BleController extends StateNotifier<BleUiState> {
         utf8.encode(jsonEncode({'op': 'register', 'owner_token': token, 'confirm': code})),
         withoutResponse: false,
       );
-      Future<void>.delayed(const Duration(seconds: 4), () async {
+      // Wait for real ACK/CAPABILITIES — do not fake success (desyncs phone vs desk tokens).
+      Future<void>.delayed(const Duration(seconds: 12), () async {
         if (state.phase == BleLinkPhase.registering && state.registered == null) {
-          await _finishRegistration(status: 'Linked');
+          state = state.copyWith(
+            phase: BleLinkPhase.recovery,
+            error: 'Deskbot did not confirm setup',
+            status: 'Try again',
+          );
         }
       });
     } catch (e) {
@@ -393,17 +398,22 @@ class BleController extends StateNotifier<BleUiState> {
         if (hint == 'Retrying auth…') {
           state = state.copyWith(phase: BleLinkPhase.authenticating, status: hint!, clearError: true);
         } else {
-          state = state.copyWith(phase: BleLinkPhase.recovery, error: 'Auth failed', status: 'Open recovery');
+          // Token mismatch or desk owned by another phone — stop looping.
+          state = state.copyWith(
+            phase: BleLinkPhase.recovery,
+            error: 'Auth failed — remove Deskbot and set up again (or factory-reset the desk).',
+            status: 'Open recovery',
+          );
           await NovaKeepAlive.updateStatus('Needs attention');
         }
       } else if (type == 'HELLO') {
         final body = (msg['body'] as Map?)?.cast<String, dynamic>();
         final id = body?['device_id']?.toString();
-        if (id != null && _sync != null) {
-          _sync = SyncEngine(sendJson: _writeJson, ownerToken: _sync!.ownerToken, deviceId: id);
+        // Update id in place — do NOT recreate SyncEngine (that reset auth retry state).
+        if (id != null && id.isNotEmpty) {
+          _sync?.deviceId = id;
         }
-        // Stay in authenticating — AUTH challenge follows from deskbot.
-        if (state.phase != BleLinkPhase.connected) {
+        if (state.phase != BleLinkPhase.connected && state.phase != BleLinkPhase.syncing) {
           state = state.copyWith(phase: BleLinkPhase.authenticating, status: 'Authenticating');
         }
       } else if (hint != null && hint.length == 4) {

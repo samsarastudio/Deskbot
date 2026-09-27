@@ -1,21 +1,30 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 
 import '../ble/framing.dart';
 import '../ble/uuids.dart';
 
 class SyncEngine {
-  SyncEngine({required this.sendJson, required this.ownerToken, required this.deviceId});
+  SyncEngine({
+    required this.sendJson,
+    required this.ownerToken,
+    required this.deviceId,
+    this.localRev = 1,
+    this.authFailures = 0,
+  });
 
   final Future<void> Function(String json) sendJson;
   final String ownerToken;
-  final String deviceId;
+  String deviceId;
 
-  int localRev = 1;
+  int localRev;
   bool authed = false;
   String? pendingNonce;
-  int _authAttempts = 0;
+  /// Failed AUTH rounds (NACKs). Not reset on HELLO.
+  int authFailures;
+  bool _authInFlight = false;
 
   Future<void> sendHello() async {
     await sendJson(envelopeJson('HELLO', {
@@ -41,10 +50,12 @@ class SyncEngine {
 
   Future<void> respondAuth(String nonce) async {
     pendingNonce = nonce;
+    final mac = macHex(ownerToken, nonce);
+    debugPrint('AUTH response nonce=${nonce.length}c token=${ownerToken.length}c');
     await sendJson(envelopeJson('AUTH', {
       'op': 'response',
       'nonce': nonce,
-      'mac': macHex(ownerToken, nonce),
+      'mac': mac,
     }));
   }
 
@@ -58,24 +69,32 @@ class SyncEngine {
     final body = (msg['body'] as Map?)?.cast<String, dynamic>() ?? {};
     switch (type) {
       case 'HELLO':
-        // Deskbot hello — do NOT echo HELLO back. Echoing regenerates the auth
-        // challenge nonce and makes our AUTH response fail with NACK.
+        // Do NOT echo HELLO — that rotates the desk challenge nonce.
+        final id = body['device_id']?.toString();
+        if (id != null && id.isNotEmpty) deviceId = id;
         return null;
       case 'AUTH':
         if (body['op'] == 'challenge' && body['nonce'] is String) {
-          _authAttempts++;
-          await respondAuth(body['nonce'] as String);
+          if (_authInFlight) return null;
+          _authInFlight = true;
+          try {
+            await respondAuth(body['nonce'] as String);
+          } finally {
+            _authInFlight = false;
+          }
         }
         return null;
       case 'ACK':
         authed = true;
-        _authAttempts = 0;
+        authFailures = 0;
         await sendStateVersion();
         return 'Linked';
       case 'NACK':
         authed = false;
-        // One retry: desk may have rotated nonce if HELLO raced.
-        if (_authAttempts < 2) {
+        authFailures++;
+        // At most one automatic retry — never loop forever.
+        if (authFailures <= 1) {
+          await Future<void>.delayed(const Duration(milliseconds: 300));
           await sendHello();
           return 'Retrying auth…';
         }
@@ -85,6 +104,7 @@ class SyncEngine {
         final rev = body['rev'] ?? body['to'];
         if (rev is num) localRev = rev.toInt();
         authed = true;
+        authFailures = 0;
         return 'Synced';
       case 'STATE_VERSION':
         if (authed) {
