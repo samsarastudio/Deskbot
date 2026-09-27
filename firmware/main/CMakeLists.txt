@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "ble_gatt.c"
+        "ownership.c"
+        "frag.c"
+        "session_sm.c"
+        "sync_proto.c"
+        "face.c"
+        "lcd.c"
+        "motion.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        nvs_flash
+        bt
+        json
+        mbedtls
+        driver
+        esp_lcd
+        esp_timer
+        led_strip
+)

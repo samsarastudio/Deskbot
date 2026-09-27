@@ -1,0 +1,47 @@
+server:
+  host: 0.0.0.0
+  port: 8765
+  path: /deskbot
+  public_host: 10.0.0.116
+
+ollama:
+  base_url: http://10.0.0.54:11434
+  gpt_oss_model: gpt-oss:20b
+  fast_model: qwen3.5:0.8b
+  behavior_model: qwen3.5:0.8b
+  keep_alive: 24h
+  # Keep the small models on CPU so gpt-oss:20b can own the NVIDIA GPU.
+  small_model_num_gpu: 0
+  small_model_num_ctx: 2048
+  behavior_temperature: 0.1
+  fast_temperature: 0.6
+  gpt_temperature: 0.7
+
+warmup:
+  behavior_model: true
+  fast_model: true
+  gpt_oss: true
+
+audio:
+  codec: pcm_s16le
+  sample_rate: 16000
+  channels: 1
+  frame_ms: 20
+
+security:
+  device_token: deskbot-local-dev
+  allowed_devices:
+    - deskbot-01
+    - deskbot-sim
+
+heartbeat:
+  interval_s: 3
+  timeout_s: 20
+
+robot:
+  head_yaw: [-35, 35]
+  head_pitch: [-15, 20]
+  default_speed: 35
+
+memory:
+  sqlite_path: data/deskbot.sqlite

@@ -1,0 +1,11 @@
+# analysis_options.yaml for nova_companion
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_const_constructors: false

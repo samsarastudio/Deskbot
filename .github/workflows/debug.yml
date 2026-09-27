@@ -1,0 +1,53 @@
+name: Debug test build
+
+# Unsigned / debug-only — not for production. Manual or on app changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "app/**"
+      - ".github/workflows/debug.yml"
+
+jobs:
+  android-debug:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze lib
+      - run: flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nova-android-debug
+          path: app/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 7
+
+  ios-debug-compile:
+    # Compiles for iOS without signing — proves the project builds on cloud macOS.
+    # Output is not installable on a phone without Apple certs.
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build ios --debug --no-codesign --simulator
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: nova-ios-debug-simulator
+          path: app/build/ios/iphonesimulator
+          retention-days: 7
+          if-no-files-found: warn

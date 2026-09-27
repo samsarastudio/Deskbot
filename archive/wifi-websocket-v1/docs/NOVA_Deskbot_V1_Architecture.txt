@@ -1,0 +1,1035 @@
+NOVA DESKBOT V1
+================
+
+NAME
+----
+NOVA = Neural Orchestrated Virtual Assistant
+
+Cute identity behavior:
+When asked "What is your name?", "Who are you?", or similar, NOVA should answer with a short cute response such as:
+
+"Hi! I'm NOVA ✨ — your little Neural Orchestrated Virtual Assistant."
+
+ESP32 display example:
+
+      ✨ NOVA ✨
+       (◕‿◕)
+     "That's me!"
+
+Alternative cute replies:
+- "I'm NOVA ✨ Your little desk buddy."
+- "NOVA! (◕‿◕) Nice to meet you!"
+- "I'm NOVA — tiny screen, big personality ✨"
+- "NOVA reporting in! (•‿•)ゞ"
+
+The backend should treat NOVA as the permanent assistant identity.
+
+
+============================================================
+PHASE 1 GOAL
+============================================================
+
+Build the software foundation first.
+
+For now, ignore:
+- microphone
+- speakers
+- servo motors
+- sensors
+- cameras
+- other electronics
+
+Only use:
+1. Web application
+2. Backend server
+3. Ollama AI
+4. ESP32-C6 with display
+5. Database / memory storage
+
+Main goal:
+
+WEB APP
+   ↕
+BACKEND
+   ↕
+OLLAMA AI
+   ↕
+ESP32-C6 DISPLAY
+
+The ESP32 should:
+- connect over Wi-Fi
+- receive chat messages
+- display chats
+- display NOVA's face
+- display emotions
+- show connection/status information
+- send device status back to the server
+
+
+============================================================
+CORE ARCHITECTURE
+============================================================
+
+ANGULAR WEB APP
+- Chat interface
+- Conversation history
+- Emotion/state preview
+- ESP32 connection status
+- NOVA face preview
+- Manual emotion controls
+- Memory viewer
+- Edit/delete memories
+- Debug console
+
+            ↓ WebSocket / REST
+
+NOVA BACKEND SERVER — Node.js + TypeScript
+- Chat Manager
+- Conversation Manager
+- AI Router
+- Emotion Manager
+- Memory Manager
+- ESP32 Gateway
+- WebSocket Server
+- Device State Manager
+
+          ↙                    ↘
+
+FAST AI BRAIN                 ESP32-C6 + DISPLAY
+Qwen3.5:0.8b                  - Wi-Fi
+- fast chat                   - WebSocket client
+- personality                 - NOVA face
+- emotion selection           - chat text
+- simple questions            - emotion animation
+- intent recognition          - status information
+- simple routing              - recent chat buffer
+
+          ↓ complex request
+
+OPTIONAL LARGE AI BRAIN
+Qwen 9B / GPT-OSS / cloud model
+Used only when needed
+
+          ↓
+
+PERSISTENT STORAGE
+PostgreSQL + pgvector
+- conversations
+- messages
+- memories
+- embeddings
+- device_state
+- personality
+
+
+============================================================
+WEB APP
+============================================================
+
+Recommended:
+- Angular
+- TypeScript
+- WebSocket
+- REST API
+- responsive layout
+
+Suggested screens:
+1. Chat
+2. Conversations
+3. NOVA Face Preview
+4. Memories
+5. Device Status
+6. Debug / Logs
+7. Settings
+
+Example UI:
+
+NOVA
+────────────────────────────────
+
+ESP32: ● Connected
+AI:    ● qwen3.5:0.8b
+Memory: ● Online
+
+       (◕‿◕)
+        HAPPY
+
+You:
+Hello NOVA!
+
+NOVA:
+Hey! Nice to see you! ✨
+
+[ Type message here... ] [ Send ]
+
+Emotions:
+[ Happy ] [ Curious ] [ Thinking ] [ Excited ] [ Sleepy ] [ Neutral ] [ Surprised ]
+
+Memory:
+[ View Memories ]
+
+ESP32 Log:
+> connected
+> emotion=happy
+> chat message received
+> face=happy_01
+
+
+============================================================
+LIVE COMMUNICATION
+============================================================
+
+Use WebSockets as the primary real-time communication layer.
+
+Recommended:
+Angular Web App ↔ Backend WebSocket Server ↔ ESP32 WebSocket Client
+
+REST APIs can be used for:
+- conversation history
+- memories
+- settings
+- device configuration
+
+WebSockets should be used for:
+- live chat
+- emotion updates
+- face state updates
+- device status
+- connection events
+- real-time commands
+
+
+============================================================
+ESP32 CHAT DISPLAY
+============================================================
+
+The ESP32 display should show:
+1. NOVA face
+2. current emotion
+3. latest user message
+4. latest NOVA reply
+5. optionally recent messages
+6. connection indicator
+
+Example:
+
+╭──────────────────────────────╮
+│          ✨ NOVA ✨          │
+│                              │
+│          (◕‿◕)               │
+│           HAPPY              │
+├──────────────────────────────┤
+│ YOU:                         │
+│ Hello NOVA!                  │
+│                              │
+│ NOVA:                        │
+│ Hey! Nice to see you! ✨     │
+╰──────────────────────────────╯
+
+ESP32 should keep only a small recent buffer in RAM.
+Suggested: last 5 to 10 messages.
+
+The complete conversation history belongs on the backend/database.
+
+
+============================================================
+FAST AI MODEL
+============================================================
+
+Recommended first model:
+qwen3.5:0.8b
+
+Purpose:
+- instant responses
+- personality
+- greetings
+- simple conversation
+- emotion selection
+- intent recognition
+- identity questions
+- simple device actions
+- deciding whether to escalate
+
+Keep answers short.
+Recommended:
+- thinking disabled for normal chat if supported
+- low latency
+- 1 to 2 sentence replies
+- concise system prompt
+
+
+============================================================
+AI RESPONSE FORMAT
+============================================================
+
+Use strict structured JSON.
+
+Example:
+{
+  "reply": "Hey! Nice to see you.",
+  "emotion": "happy",
+  "face": "happy_01",
+  "action": "none",
+  "memory_action": "none",
+  "escalate": false
+}
+
+Harder question:
+{
+  "reply": "Hmm, let me think about that.",
+  "emotion": "thinking",
+  "face": "thinking_01",
+  "action": "none",
+  "memory_action": "none",
+  "escalate": true
+}
+
+Identity response:
+{
+  "reply": "Hi! I'm NOVA ✨ — your little Neural Orchestrated Virtual Assistant.",
+  "emotion": "happy",
+  "face": "happy_02",
+  "action": "name_intro",
+  "memory_action": "none",
+  "escalate": false
+}
+
+
+============================================================
+NOVA PERSONALITY
+============================================================
+
+NOVA should be:
+- cute
+- warm
+- concise
+- playful
+- curious
+- helpful
+- expressive
+- not overly verbose
+
+Default response style:
+- short
+- conversational
+- friendly
+- one or two sentences
+
+Example system personality:
+
+"You are NOVA, a cute and expressive desk companion.
+NOVA means Neural Orchestrated Virtual Assistant.
+Keep normal replies short and natural.
+Choose an emotion and face for every reply.
+When asked your name, introduce yourself as NOVA in a cute way.
+Do not over-explain unless the user asks."
+
+
+============================================================
+EMOTION SYSTEM
+============================================================
+
+The AI should select an emotion for every response.
+
+Initial emotion list:
+neutral
+happy
+excited
+curious
+thinking
+surprised
+confused
+sad
+sleepy
+proud
+shy
+love
+laughing
+worried
+angry
+focused
+celebrating
+
+
+============================================================
+SMILEY / FACE LIBRARY
+============================================================
+
+The ESP32 should contain a local smiley/face library.
+The AI only sends:
+- emotion
+- face ID
+
+The ESP32 handles visual rendering locally.
+
+NEUTRAL
+neutral_01     (•‿•)
+neutral_02     (•_•)
+neutral_03     (˙ᵕ˙)
+
+HAPPY
+happy_01       (◕‿◕)
+happy_02       (^‿^)
+happy_03       (ᵔ◡ᵔ)
+happy_04       (｡◕‿◕｡)
+
+EXCITED
+excited_01     (★‿★)
+excited_02     (≧▽≦)
+excited_03     ヽ(>∀<☆)ノ
+
+CURIOUS
+curious_01     (•ᴗ•)?
+curious_02     (◉‿◉)
+curious_03     (・_・?)
+
+THINKING
+thinking_01    (•_•)...
+thinking_02    (¬_¬)
+thinking_03    (｡•́‿•̀｡)
+thinking_04    (•̀ᴗ•́)و
+
+SURPRISED
+surprised_01   (⊙_⊙)
+surprised_02   (°o°)
+surprised_03   (O_O)
+
+CONFUSED
+confused_01    (・_・;)
+confused_02    (￣～￣;)
+confused_03    (⊙_☉)?
+
+SAD
+sad_01         (｡•́︿•̀｡)
+sad_02         (╥﹏╥)
+sad_03         (•́ ︿ •̀)
+
+SLEEPY
+sleepy_01      (-_-) zzz
+sleepy_02      (￣o￣) zzZ
+sleepy_03      (－_－) zzZ
+
+PROUD
+proud_01       (￣^￣)ゞ
+proud_02       (•̀ᴗ•́)و
+proud_03       (⌐■‿■)
+
+SHY
+shy_01         (⁄ ⁄•⁄ω⁄•⁄ ⁄)
+shy_02         (〃ω〃)
+shy_03         (⁄˘⁄ ⁄ ω⁄ ⁄ ˘⁄)
+
+LOVE
+love_01        (♥‿♥)
+love_02        (♡ω♡)
+love_03        (｡♥‿♥｡)
+
+LAUGHING
+laughing_01    (≧▽≦)
+laughing_02    XD
+laughing_03    (＾▽＾)
+
+WORRIED
+worried_01     (・_・;)
+worried_02     (´･_･`)
+worried_03     (⊙﹏⊙)
+
+ANGRY
+angry_01       (ಠ_ಠ)
+angry_02       (ง'̀-'́)ง
+angry_03       (¬_¬")
+
+FOCUSED
+focused_01     (•̀_•́)
+focused_02     (⌐■_■)
+focused_03     (•̀ᴗ•́)و
+
+CELEBRATING
+celebrate_01   ＼(^o^)／
+celebrate_02   ヽ(•‿•)ノ
+celebrate_03   (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧
+
+
+============================================================
+FACE ANIMATION LIBRARY
+============================================================
+
+happy:
+- smile
+- soft blink
+- eye bounce
+
+curious:
+- eyes widen slightly
+- eyes shift left/right
+- question-mark pulse
+
+thinking:
+- eyes look upward
+- slow blink
+- animated dots "..."
+
+excited:
+- eye sparkle
+- quick bounce
+- fast blink
+
+surprised:
+- eyes expand
+- mouth opens
+- quick pulse
+
+sleepy:
+- slow blink
+- eyes half closed
+- zzz animation
+
+sad:
+- eyes angle downward
+- slow blink
+- small mouth
+
+love:
+- heart eyes
+- heart pulse
+
+laughing:
+- closed happy eyes
+- mouth animation
+
+angry:
+- narrowed eyes
+- small shake
+
+focused:
+- narrowed centered eyes
+- subtle pulse
+
+celebrating:
+- sparkle animation
+- bouncing eyes
+- confetti-style pixels if display supports it
+
+
+============================================================
+OLLAMA TO ESP32 EMOTION FLOW
+============================================================
+
+User message
+    ↓
+Backend
+    ↓
+Ollama / Qwen3.5 0.8B
+    ↓
+{
+  "reply": "That's awesome!",
+  "emotion": "excited",
+  "face": "excited_02"
+}
+    ↓
+Backend stores message
+    ↓
+Backend sends WebSocket packet
+    ↓
+{
+  "type": "chat",
+  "speaker": "nova",
+  "text": "That's awesome!",
+  "emotion": "excited",
+  "face": "excited_02"
+}
+    ↓
+ESP32
+
+ESP32:
+- displays chat
+- loads excited_02
+- plays excited animation
+
+
+============================================================
+CHAT STORAGE
+============================================================
+
+Every user and NOVA message should be stored.
+
+Suggested message schema:
+{
+  "id": "uuid",
+  "conversationId": "uuid",
+  "role": "assistant",
+  "content": "Nice! Are you working on the Camaro again?",
+  "emotion": "curious",
+  "face": "curious_01",
+  "model": "qwen3.5:0.8b",
+  "timestamp": "ISO_DATE"
+}
+
+Suggested database tables:
+users
+conversations
+messages
+memories
+memory_embeddings
+device_state
+personality_settings
+
+
+============================================================
+CONVERSATION HISTORY
+============================================================
+
+Web app should allow:
+- new conversation
+- open previous conversation
+- rename conversation
+- delete conversation
+- search conversations
+
+Suggested grouping:
+Today
+Yesterday
+Previous 7 Days
+Previous 30 Days
+Older
+
+
+============================================================
+MEMORY SYSTEM
+============================================================
+
+Do NOT send the entire historical chat to the model every time.
+
+Use two layers:
+1. Conversation history
+2. Long-term memory
+
+Conversation
+    ↓
+Store full message
+    ↓
+Memory extractor
+    ↓
+Worth remembering?
+    ├─ No
+    └─ Yes → Memory Database
+
+Example:
+User: "My favorite car color is red."
+
+Extracted memory:
+{
+  "type": "preference",
+  "key": "favorite_car_color",
+  "value": "red",
+  "summary": "User prefers red cars.",
+  "importance": 0.80
+}
+
+Later:
+User: "What color should we make the Camaro?"
+
+Backend searches memories.
+Relevant memory: "User prefers red cars."
+
+Model context becomes:
+Relevant memories:
+- User prefers red cars.
+
+User:
+What color should we make the Camaro?
+
+
+============================================================
+MEMORY CATEGORIES
+============================================================
+
+preferences
+projects
+people
+places
+routines
+devices
+goals
+interests
+decisions
+facts
+personality_context
+
+
+============================================================
+MEMORY WEB UI
+============================================================
+
+Make memory visible and editable.
+
+Example:
+
+NOVA MEMORY
+──────────────────────────
+
+Preferences
+• Likes red cars
+• Prefers short answers
+
+Projects
+• NOVA Deskbot
+• Camaro 3D printing
+
+Interests
+• AI
+• 3D printing
+
+[ Edit ]
+[ Delete ]
+[ Add Memory ]
+
+
+============================================================
+MEMORY SEARCH
+============================================================
+
+Recommended final storage:
+PostgreSQL + pgvector
+
+PostgreSQL stores:
+- chats
+- users
+- device state
+- memory metadata
+
+pgvector stores:
+- memory embeddings
+
+Memory retrieval:
+Current message
+     ↓
+Embedding
+     ↓
+Vector search
+     ↓
+Top relevant memories
+     ↓
+AI prompt
+
+
+============================================================
+AI ROUTING
+============================================================
+
+Fast model:
+qwen3.5:0.8b
+
+Use for:
+- greetings
+- personality
+- simple conversation
+- identity
+- emotions
+- simple commands
+- routing
+
+If complex:
+{
+  "escalate": true
+}
+
+Then backend can call:
+- Qwen 9B
+- GPT-OSS
+- cloud AI
+- another larger model
+
+While waiting, fast model can reply:
+"One sec, I'm thinking! (•_•)..."
+
+and show:
+thinking_01
+
+
+============================================================
+WEBSOCKET MESSAGE TYPES
+============================================================
+
+CHAT
+{
+  "type": "chat",
+  "speaker": "nova",
+  "text": "Hello!",
+  "emotion": "happy",
+  "face": "happy_01"
+}
+
+FACE
+{
+  "type": "face",
+  "emotion": "curious",
+  "face": "curious_02"
+}
+
+STATUS
+{
+  "type": "status",
+  "online": true,
+  "device": "nova-deskbot",
+  "face": "neutral_01"
+}
+
+COMMAND
+{
+  "type": "command",
+  "action": "blink"
+}
+
+PING
+{"type":"ping"}
+
+PONG
+{"type":"pong"}
+
+
+============================================================
+ESP32 CONNECTION
+============================================================
+
+ESP32 starts
+    ↓
+connect Wi-Fi
+    ↓
+connect WebSocket
+    ↓
+send status
+    ↓
+backend marks NOVA online
+    ↓
+web app updates
+
+If disconnected:
+- ESP32 attempts reconnect
+- screen can show offline face
+
+Example:
+     (•_•)
+   OFFLINE...
+
+When reconnected:
+     (◕‿◕)
+  BACK ONLINE!
+
+
+============================================================
+DEVICE STATE
+============================================================
+
+Backend should track:
+{
+  "deviceId": "nova-01",
+  "online": true,
+  "ip": "...",
+  "currentEmotion": "happy",
+  "currentFace": "happy_01",
+  "lastSeen": "...",
+  "firmwareVersion": "0.1.0"
+}
+
+
+============================================================
+RECOMMENDED SOFTWARE STACK
+============================================================
+
+Frontend:
+Angular
+TypeScript
+
+Backend:
+Node.js
+TypeScript
+Express or Fastify
+
+Realtime:
+WebSocket
+
+AI:
+Ollama
+qwen3.5:0.8b
+
+Database:
+PostgreSQL
+
+Memory:
+pgvector
+
+ESP32:
+ESP32-C6
+Wi-Fi
+WebSocket Client
+Local Face/Smiley Library
+
+
+============================================================
+RECOMMENDED BACKEND SERVICES
+============================================================
+
+ChatService
+ConversationService
+AIService
+AIRouterService
+EmotionService
+FaceService
+MemoryService
+EmbeddingService
+Esp32Service
+WebSocketService
+DeviceStateService
+
+
+============================================================
+FULL CHAT FLOW
+============================================================
+
+User types in Angular
+       ↓
+Backend receives message
+       ↓
+Store user message
+       ↓
+Search relevant memories
+       ↓
+Build small AI context
+       ↓
+Qwen3.5:0.8b
+       ↓
+Returns:
+reply
+emotion
+face
+action
+memory_action
+escalate
+       ↓
+Store NOVA reply
+       ↓
+Send to Angular
+       ↓
+Send to ESP32
+       ↓
+ESP32:
+- shows NOVA face
+- plays emotion animation
+- displays reply
+       ↓
+Memory extractor
+       ↓
+Store useful memories
+
+
+============================================================
+FIRST DEVELOPMENT MILESTONES
+============================================================
+
+MILESTONE 1
+Angular web app + Node backend
+Goal: web chat sends/receives messages
+
+MILESTONE 2
+ESP32 WebSocket connection
+Goal: web button [ HAPPY ] changes ESP32 screen to (◕‿◕)
+
+MILESTONE 3
+Ollama integration
+Goal:
+User: Hello!
+Qwen returns reply + emotion + face
+Web shows reply
+ESP32 shows matching face
+
+MILESTONE 4
+Persistent conversations
+Store every user message and every NOVA response with emotion, face, timestamp
+
+MILESTONE 5
+Conversation history UI
+
+MILESTONE 6
+Memory extraction
+
+MILESTONE 7
+Memory retrieval
+
+MILESTONE 8
+Larger-model escalation
+
+
+============================================================
+V1 DEFINITION
+============================================================
+
+NOVA V1 =
+Angular Web App
++
+Node.js / TypeScript Backend
++
+WebSockets
++
+PostgreSQL
++
+Ollama
++
+Qwen3.5:0.8b
++
+ESP32-C6 Display
++
+Chat UI
++
+Emotion System
++
+Local Smiley / Face Library
++
+Persistent Conversations
++
+Long-Term Memory
+
+
+============================================================
+KEY DESIGN PRINCIPLE
+============================================================
+
+The AI decides WHAT NOVA FEELS.
+Example:
+emotion = "happy"
+face = "happy_02"
+
+The ESP32 decides HOW THAT EMOTION LOOKS.
+Example:
+happy_02
+→ load face graphic
+→ animate eyes
+→ blink
+→ animate mouth
+
+This means AI latency does not control animation frame rate.
+NOVA can remain visually alive even when the AI is processing.
+
+
+============================================================
+FINAL NOVA IDENTITY
+============================================================
+
+Name:
+NOVA
+
+Meaning:
+Neural Orchestrated Virtual Assistant
+
+Default cute identity response:
+"Hi! I'm NOVA ✨ — your little Neural Orchestrated Virtual Assistant."
+
+Default face when introducing itself:
+(◕‿◕)
+
+Optional intro animation:
+1. eyes closed
+2. blink open
+3. sparkle
+4. show "✨ NOVA ✨"
+5. display "That's me!"

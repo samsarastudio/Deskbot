@@ -1,0 +1,24 @@
+#pragma once
+
+/* Waveshare 1.47" ST7789 landscape. */
+#define DESKBOT_LCD_WIDTH       320
+#define DESKBOT_LCD_HEIGHT      172
+
+#define DESKBOT_FW_VERSION      "1.0.0"
+#define DESKBOT_MODEL           "deskbot-c6-147"
+#define DESKBOT_PROTOCOL_VER    1
+#define DESKBOT_ADV_NAME_SETUP  "NOVA-Setup"
+#define DESKBOT_ADV_NAME_REG    "NOVA"
+
+/* BLE UUIDs — see docs/protocol_v1.md */
+#define DESKBOT_UUID_SERVICE    "6e6f7661-0001-4000-8000-6465736b626f"
+#define DESKBOT_UUID_CMD_RX     "6e6f7661-0002-4000-8000-6465736b626f"
+#define DESKBOT_UUID_EVT_TX     "6e6f7661-0003-4000-8000-6465736b626f"
+#define DESKBOT_UUID_INFO       "6e6f7661-0004-4000-8000-6465736b626f"
+#define DESKBOT_UUID_SESSION    "6e6f7661-0005-4000-8000-6465736b626f"
+
+#define DESKBOT_FRAG_MAGIC      0xA5
+#define DESKBOT_FRAG_MORE       0x01
+#define DESKBOT_FRAG_FINAL      0x02
+#define DESKBOT_MAX_MSG         2048
+#define DESKBOT_FRAG_PAYLOAD    160

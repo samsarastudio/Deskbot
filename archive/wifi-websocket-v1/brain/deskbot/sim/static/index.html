@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NOVA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css?v=15" />
+</head>
+<body>
+  <main class="app">
+    <section class="lcd-wrap">
+      <div class="lcd" id="lcd" data-expression="neutral" data-state="offline" data-gaze="user">
+        <div class="lcd-status" id="lcdState">OFFLINE</div>
+        <div class="lcd-emotion" id="lcdEmotion">NEUTRAL</div>
+        <div class="face">
+          <div class="side left">
+            <div class="brow"></div>
+            <div class="eye">
+              <span class="lid top"></span>
+              <span class="lid bottom"></span>
+              <span class="pupil"></span>
+            </div>
+          </div>
+          <div class="center">
+            <div class="clock" id="clock">12:00</div>
+            <div class="ampm" id="ampm">PM</div>
+            <div class="intro" id="intro">That's me!</div>
+            <div class="mouth" id="mouth"></div>
+          </div>
+          <div class="side right">
+            <div class="brow"></div>
+            <div class="eye">
+              <span class="lid top"></span>
+              <span class="lid bottom"></span>
+              <span class="pupil"></span>
+            </div>
+          </div>
+        </div>
+        <div class="lcd-chat tele" id="lcdChat">
+          <div class="smiley" id="smiley" data-mood="happy">
+            <span class="s-eye e-l"></span>
+            <span class="s-eye e-r"></span>
+            <span class="s-mouth"></span>
+          </div>
+          <div class="prompt-text" id="promptText"></div>
+        </div>
+        <div class="snap-layer" id="snapLayer" aria-hidden="true">
+          <svg class="snap-heart" viewBox="0 0 32 29" fill="none">
+            <path d="M16 27S1.4 17.2 1.4 8.8C1.4 4.4 4.8 1.2 8.9 1.2c3.3 0 5.6 2 7.1 4.8C17.5 3.2 19.8 1.2 23.1 1.2c4.1 0 7.5 3.2 7.5 7.6C30.6 17.2 16 27 16 27z"/>
+          </svg>
+          <canvas id="heartParticles" width="640" height="344"></canvas>
+        </div>
+      </div>
+      <p class="hint">NOVA · 320×172 ST7789 · Neural Orchestrated Virtual Assistant</p>
+    </section>
+
+    <section class="panel">
+      <header>
+        <h1>NOVA</h1>
+        <p id="conn" class="conn disconnected">Disconnected</p>
+      </header>
+
+      <div class="meta">
+        <div><span>ESP32</span><strong id="robot">offline</strong></div>
+        <div id="aiCard"><span>AI</span><strong id="aiModel">qwen3.5:0.8b</strong></div>
+        <div id="routeCard"><span>Route</span><strong id="route">—</strong></div>
+        <div><span>Face</span><strong id="style">neutral_01</strong></div>
+      </div>
+      <p class="xfer-banner" id="xferBanner">Transferring to gpt-oss:20b…</p>
+
+      <div class="row">
+        <button id="connectBtn">Connect</button>
+        <button data-event="wake">Wake</button>
+        <button data-event="touch">Touch</button>
+        <button data-event="sleep">Sleep</button>
+        <button data-event="stop">Stop</button>
+      </div>
+
+      <div class="row">
+        <button type="button" data-control="look_left">Look left</button>
+        <button type="button" data-control="look_center">Center</button>
+        <button type="button" data-control="look_right">Look right</button>
+        <button type="button" class="heart-btn" data-control="heart">♥ Heart</button>
+      </div>
+
+      <div class="row expressions">
+        <button type="button" data-expression="neutral">Neutral</button>
+        <button type="button" data-expression="happy">Happy</button>
+        <button type="button" data-expression="curious">Curious</button>
+        <button type="button" data-expression="thinking">Thinking</button>
+        <button type="button" data-expression="excited">Excited</button>
+        <button type="button" data-expression="surprised">Surprised</button>
+        <button type="button" data-expression="sleepy">Sleepy</button>
+        <button type="button" data-expression="love">Love</button>
+        <button type="button" data-expression="laughing">Laughing</button>
+        <button type="button" data-expression="focused">Focused</button>
+      </div>
+
+      <form id="talk">
+        <input id="text" autocomplete="off" placeholder="Talk to NOVA…" />
+        <button type="submit">Send</button>
+      </form>
+
+      <div class="row">
+        <button id="micBtn" type="button">Mic</button>
+        <label class="toggle"><input type="checkbox" id="voiceOut" checked /> Speak replies</label>
+      </div>
+
+      <pre id="log"></pre>
+    </section>
+  </main>
+  <script src="/static/app.js?v=15"></script>
+</body>
+</html>

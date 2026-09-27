@@ -1,0 +1,1012 @@
+#include "face.h"
+
+#include <math.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/time.h>
+#include <time.h>
+
+#include "esp_log.h"
+#include "esp_random.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
+#include "led_strip.h"
+
+#include "app_config.h"
+#include "lcd.h"
+#include "pins.h"
+
+static const char *TAG = "face";
+static led_strip_handle_t s_led;
+static face_state_t s_state = FACE_OFFLINE;
+static char s_expression[24] = "neutral";
+static char s_gaze[12] = "user";
+static bool s_blink;
+static bool s_dirty = true;
+static SemaphoreHandle_t s_lock;
+static int64_t s_next_blink_us;
+static bool s_heart;
+static int64_t s_heart_t0;
+static int64_t s_heart_last_us;
+static bool s_intro;
+static int64_t s_intro_t0;
+static char s_chat_user[80];
+static char s_chat_nova[192];
+static char s_face_id[20] = "neutral_01";
+static int64_t s_prompt_t0;
+static bool s_ble_status;
+static char s_ble_label[24];
+static char s_ble_code[8];
+static int64_t s_ble_flash_until;
+static bool s_ble_pip;
+
+#define HEART_MS 2400
+#define INTRO_MS 2200
+#define PART_N 48
+
+typedef struct {
+    float x, y, vx, vy, age, life, r;
+    uint8_t kind;
+    bool alive;
+} part_t;
+
+static part_t s_parts[PART_N];
+
+static float frand(void)
+{
+    return (esp_random() & 0xFFFF) / 65535.0f;
+}
+
+static float clampf(float v, float lo, float hi)
+{
+    if (v < lo) {
+        return lo;
+    }
+    if (v > hi) {
+        return hi;
+    }
+    return v;
+}
+
+static void rgb(uint8_t r, uint8_t g, uint8_t b)
+{
+    if (!s_led) {
+        return;
+    }
+    led_strip_set_pixel(s_led, 0, r, g, b);
+    led_strip_refresh(s_led);
+}
+
+static const char *state_label(face_state_t state)
+{
+    if (state == FACE_OFFLINE) {
+        return "OFFLINE";
+    }
+    if (state == FACE_SLEEP) {
+        return "SLEEP";
+    }
+    return "NOVA";
+}
+
+static void ascii_clip(char *dst, size_t dst_len, const char *src)
+{
+    if (!dst || dst_len == 0) {
+        return;
+    }
+    size_t o = 0;
+    if (src) {
+        for (const unsigned char *p = (const unsigned char *)src; *p && o + 1 < dst_len; p++) {
+            if (*p >= 32 && *p <= 126) {
+                dst[o++] = (char)*p;
+            }
+        }
+    }
+    dst[o] = 0;
+}
+
+static void spawn_particle(part_t *p, float cx, float cy, bool burst)
+{
+    float ang = -1.5708f + (frand() * 2.0f - 1.0f) * 1.85f;
+    float spd = 70.0f + frand() * 110.0f;
+    if (burst) {
+        spd += 40.0f;
+    }
+    p->x = cx + (frand() * 180.0f - 90.0f);
+    p->y = cy + (frand() * 50.0f - 16.0f);
+    p->vx = cosf(ang) * spd;
+    p->vy = sinf(ang) * spd;
+    p->age = 0.0f;
+    p->life = 0.55f + frand() * 0.65f;
+    p->r = 1.5f + frand() * 3.2f;
+    p->kind = (uint8_t)(esp_random() % 3);
+    p->alive = true;
+}
+
+static void heart_reset_parts(float cx, float cy)
+{
+    for (int i = 0; i < PART_N; i++) {
+        s_parts[i].alive = false;
+        if (i < 18) {
+            spawn_particle(&s_parts[i], cx, cy, true);
+            s_parts[i].age = frand() * 0.05f;
+        }
+    }
+}
+
+static void update_particles(float dt, float cx, float cy, float t)
+{
+    for (int i = 0; i < PART_N; i++) {
+        part_t *p = &s_parts[i];
+        if (!p->alive) {
+            if (t > 0.08f && t < 1.55f && frand() < 0.55f) {
+                spawn_particle(p, cx, cy, false);
+            }
+            continue;
+        }
+        p->age += dt;
+        p->vy += 95.0f * dt;
+        p->vx *= (1.0f - 0.35f * dt);
+        p->x += p->vx * dt;
+        p->y += p->vy * dt;
+        if (p->age >= p->life || p->y < -12.0f || p->y > DESKBOT_LCD_HEIGHT + 10) {
+            p->alive = false;
+        }
+    }
+}
+
+static void draw_particles(void)
+{
+    for (int i = 0; i < PART_N; i++) {
+        const part_t *p = &s_parts[i];
+        if (!p->alive) {
+            continue;
+        }
+        float fade = 1.0f - p->age / p->life;
+        if (fade < 0.08f) {
+            continue;
+        }
+        int x = (int)(p->x + 0.5f);
+        int y = (int)(p->y + 0.5f);
+        if (p->kind == 1) {
+            int s = (int)(10.0f + fade * 14.0f);
+            lcd_blit_heart(x, y, s, (s * 7) / 8, COL_HEART, COL_HEART_H);
+        } else if (p->kind == 2) {
+            int arm = 2 + (int)(fade * 3.0f);
+            lcd_spark(x, y, 1, COL_GOLD);
+            lcd_fill_rect(x - arm, y, arm * 2 + 1, 1, COL_GOLD);
+            lcd_fill_rect(x, y - arm, 1, arm * 2 + 1, COL_GOLD);
+        } else {
+            lcd_spark(x, y, 1 + (int)(p->r * fade * 0.6f), fade > 0.5f ? COL_SPARK : COL_HEART_H);
+        }
+    }
+}
+
+static float heart_pop(float t)
+{
+    if (t < 0.04f) {
+        return 0.0f;
+    }
+    if (t < 0.16f) {
+        float u = (t - 0.04f) / 0.12f;
+        u = u * u * (3.0f - 2.0f * u);
+        return u * 1.12f;
+    }
+    if (t < 0.26f) {
+        float u = (t - 0.16f) / 0.10f;
+        return 1.12f - 0.12f * u;
+    }
+    if (t < 1.85f) {
+        return 1.0f + 0.018f * sinf(t * 10.0f);
+    }
+    float u = clampf((t - 1.85f) / 0.55f, 0.0f, 1.0f);
+    u = u * u;
+    return 1.0f - u;
+}
+
+static void draw_heart_scene(float t, float dt)
+{
+    const float cx = DESKBOT_LCD_WIDTH * 0.5f;
+    const float cy = DESKBOT_LCD_HEIGHT * 0.52f;
+    lcd_fill(COL_BG);
+    update_particles(dt, cx, cy, t);
+    float pop = heart_pop(t);
+    if (pop > 0.03f) {
+        int w = (int)(318.0f * pop);
+        int h = (int)(168.0f * pop);
+        lcd_blit_heart((int)cx, (int)cy, w, h, COL_HEART, COL_HEART_H);
+        lcd_blit_heart((int)cx, (int)cy - h / 8, w / 3, h / 3, COL_SPARK, COL_HEART);
+    }
+    draw_particles();
+}
+
+static void schedule_blink(void)
+{
+    uint32_t span = 2400 + (esp_random() % 4200);
+    if (!strcmp(s_expression, "sleepy") || s_state == FACE_SLEEP) {
+        span = 1600 + (esp_random() % 1800);
+    }
+    s_next_blink_us = esp_timer_get_time() + (int64_t)span * 1000;
+}
+
+static void lid_chord(float cx, float cy, float rx, float ry, float y, float stroke)
+{
+    float ny = (y - cy) / ry;
+    float inside = 1.0f - ny * ny;
+    if (inside < 0.04f) {
+        return;
+    }
+    float hw = rx * sqrtf(inside);
+    lcd_neon_capsule(cx - hw, y, cx + hw, y, stroke * 0.55f, 5.5f, COL_FACE, COL_ACCENT);
+}
+
+static void draw_brow(float cx, float cy, float ry, float dy, float rot_deg, float width)
+{
+    float rad = rot_deg * 0.01745329252f;
+    float y = cy - ry - 14.0f + dy;
+    float hx = (width * 0.5f) * cosf(rad);
+    float hy = (width * 0.5f) * sinf(rad);
+    lcd_neon_capsule(cx - hx, y - hy, cx + hx, y + hy, 2.1f, 6.0f, COL_FACE, COL_ACCENT);
+}
+
+static void draw_eye(int cx, int cy, bool left, int pupil_dx, int pupil_dy, bool blink)
+{
+    float rx = 26.0f;
+    float ry = 26.0f;
+    float top_lid = 0.0f;
+    float bot_lid = 0.0f;
+    float brow_dy = 0.0f;
+    float brow_rot = 0.0f;
+    float brow_w = 30.0f;
+    float pupil_r = 6.2f;
+    float stroke = 3.4f;
+
+    if (!strcmp(s_expression, "happy") || !strcmp(s_expression, "amused")) {
+        ry = !strcmp(s_expression, "amused") ? 13.0f : 17.0f;
+        top_lid = 0.10f;
+        bot_lid = 0.28f;
+        brow_dy = -3.0f;
+        brow_rot = left ? -8.0f : 8.0f;
+        pupil_r = 5.0f;
+    } else if (!strcmp(s_expression, "curious")) {
+        if (left) {
+            top_lid = 0.16f;
+            brow_rot = -6.0f;
+            brow_dy = 1.0f;
+        } else {
+            ry = 31.0f;
+            top_lid = 0.0f;
+            brow_rot = 18.0f;
+            brow_dy = -9.0f;
+            brow_w = 32.0f;
+        }
+    } else if (!strcmp(s_expression, "surprised")) {
+        rx = 21.0f;
+        ry = 34.0f;
+        pupil_r = 8.0f;
+        brow_dy = -11.0f;
+        brow_w = 26.0f;
+        stroke = 3.8f;
+    } else if (!strcmp(s_expression, "excited")) {
+        rx = 28.0f;
+        ry = 28.0f;
+        brow_dy = -6.0f;
+        pupil_r = 7.0f;
+    } else if (!strcmp(s_expression, "focused")) {
+        ry = 20.0f;
+        top_lid = 0.18f;
+        brow_dy = 3.0f;
+        brow_rot = left ? 10.0f : -10.0f;
+        pupil_r = 4.5f;
+    } else if (!strcmp(s_expression, "sleepy")) {
+        ry = 11.0f;
+        top_lid = 0.22f;
+        bot_lid = 0.30f;
+        brow_dy = 6.0f;
+        pupil_r = 4.0f;
+    } else if (!strcmp(s_expression, "confused")) {
+        if (left) {
+            brow_rot = -18.0f;
+            brow_dy = -4.0f;
+            top_lid = 0.08f;
+        } else {
+            brow_rot = 8.0f;
+            top_lid = 0.18f;
+        }
+    } else if (!strcmp(s_expression, "skeptical")) {
+        if (left) {
+            ry = 24.0f;
+        } else {
+            top_lid = 0.38f;
+            brow_rot = -14.0f;
+            brow_dy = 5.0f;
+            pupil_r = 4.5f;
+        }
+    } else if (!strcmp(s_expression, "sympathetic") || !strcmp(s_expression, "sad") || !strcmp(s_expression, "worried")) {
+        brow_rot = left ? -12.0f : 12.0f;
+        brow_dy = 2.0f;
+        top_lid = 0.12f;
+        bot_lid = 0.08f;
+    } else if (!strcmp(s_expression, "thinking")) {
+        brow_dy = -4.0f;
+        pupil_r = 5.4f;
+        top_lid = 0.06f;
+    } else if (!strcmp(s_expression, "laughing") || !strcmp(s_expression, "celebrating")) {
+        ry = 12.0f;
+        top_lid = 0.18f;
+        bot_lid = 0.34f;
+        brow_dy = -5.0f;
+        pupil_r = 4.2f;
+    } else if (!strcmp(s_expression, "angry")) {
+        ry = 18.0f;
+        top_lid = 0.22f;
+        brow_rot = left ? 16.0f : -16.0f;
+        brow_dy = 4.0f;
+        pupil_r = 4.0f;
+    } else if (!strcmp(s_expression, "shy")) {
+        ry = 18.0f;
+        top_lid = 0.20f;
+        brow_dy = 4.0f;
+        pupil_r = 4.8f;
+    } else if (!strcmp(s_expression, "proud")) {
+        ry = 22.0f;
+        brow_dy = -4.0f;
+        pupil_r = 5.6f;
+    } else if (!strcmp(s_expression, "love")) {
+        ry = 24.0f;
+        brow_dy = -3.0f;
+        pupil_r = 0.0f;
+    }
+
+    if (blink || s_state == FACE_SLEEP) {
+        top_lid = 0.46f;
+        bot_lid = 0.46f;
+        pupil_r = 0.0f;
+    }
+
+    float y_min = cy - ry + top_lid * 2.0f * ry;
+    float y_max = cy + ry - bot_lid * 2.0f * ry;
+    if (y_max < y_min + 3.0f) {
+        float mid = (y_min + y_max) * 0.5f;
+        y_min = mid - 1.5f;
+        y_max = mid + 1.5f;
+    }
+
+    draw_brow((float)cx, (float)cy, ry, brow_dy, brow_rot, brow_w);
+    lcd_neon_ellipse_ring((float)cx, (float)cy, rx, ry, stroke, 6.5f, y_min, y_max, COL_FACE, COL_ACCENT);
+    lid_chord((float)cx, (float)cy, rx, ry, y_min, stroke);
+    lid_chord((float)cx, (float)cy, rx, ry, y_max, stroke);
+    if (pupil_r > 0.5f) {
+        float py = clampf((float)(cy + pupil_dy), y_min + pupil_r, y_max - pupil_r);
+        lcd_neon_disk((float)(cx + pupil_dx), py, pupil_r, 5.5f, COL_FACE, COL_ACCENT);
+    } else if (!blink && s_state != FACE_SLEEP && !strcmp(s_expression, "love")) {
+        lcd_blit_heart(cx + pupil_dx, cy + pupil_dy, 18, 16, COL_HEART, COL_HEART_H);
+    }
+}
+
+static int mouth_smile(void)
+{
+    if (!strcmp(s_expression, "happy") || !strcmp(s_expression, "amused") ||
+        !strcmp(s_expression, "excited") || !strcmp(s_expression, "laughing") ||
+        !strcmp(s_expression, "proud") || !strcmp(s_expression, "celebrating") ||
+        !strcmp(s_expression, "love")) {
+        return 2;
+    }
+    if (!strcmp(s_expression, "surprised") || !strcmp(s_expression, "angry")) {
+        return -1;
+    }
+    if (!strcmp(s_expression, "sympathetic") || !strcmp(s_expression, "sleepy") ||
+        !strcmp(s_expression, "sad") || !strcmp(s_expression, "worried") ||
+        !strcmp(s_expression, "shy")) {
+        return -1;
+    }
+    if (!strcmp(s_expression, "confused") || !strcmp(s_expression, "skeptical")) {
+        return 0;
+    }
+    return 0;
+}
+
+static void draw_mouth(void)
+{
+    float cx = DESKBOT_LCD_WIDTH / 2.0f;
+    float cy = 130.0f;
+    float w = 34.0f;
+    int smile = mouth_smile();
+    if (!strcmp(s_expression, "surprised")) {
+        lcd_neon_ellipse_ring(cx, cy, 7.0f, 5.0f, 2.2f, 5.5f, cy - 8.0f, cy + 8.0f, COL_FACE, COL_ACCENT);
+        return;
+    }
+    if (!strcmp(s_expression, "happy") || !strcmp(s_expression, "amused")) {
+        w = 40.0f;
+    }
+    float lift = 5.0f * (float)smile;
+    lcd_neon_capsule(cx - w * 0.5f, cy, cx, cy - lift, 2.0f, 6.0f, COL_FACE, COL_ACCENT);
+    lcd_neon_capsule(cx, cy - lift, cx + w * 0.5f, cy, 2.0f, 6.0f, COL_FACE, COL_ACCENT);
+}
+
+static void smile_arc(int cx, int cy, int w, int h, uint16_t color, bool frown)
+{
+    for (int x = -w; x <= w; x++) {
+        int y = (x * x * h) / (w * w + 1);
+        /* y grows downward, so a smile is ∪ (center lower) and a frown is ∩. */
+        int py = frown ? (cy + y) : (cy - y);
+        lcd_fill_rect(cx + x, py, 2, 3, color);
+    }
+}
+
+static void draw_smiley(void)
+{
+    const int cx = DESKBOT_LCD_WIDTH / 2;
+    const int cy = 50;
+    const int r = 28;
+    uint16_t skin = COL_GOLD;
+    uint16_t ink = COL_BG;
+    if (!strcmp(s_expression, "love")) {
+        skin = COL_HEART;
+    } else if (!strcmp(s_expression, "sad") || !strcmp(s_expression, "worried") || !strcmp(s_expression, "shy")) {
+        skin = RGB565(186, 210, 230);
+    } else if (!strcmp(s_expression, "angry")) {
+        skin = RGB565(255, 118, 88);
+    } else if (!strcmp(s_expression, "sleepy")) {
+        skin = RGB565(210, 214, 160);
+    }
+
+    lcd_fill_circle(cx, cy, r, skin);
+
+    bool closed = !strcmp(s_expression, "laughing") || !strcmp(s_expression, "amused") ||
+                  !strcmp(s_expression, "sleepy");
+    bool hearts = !strcmp(s_expression, "love");
+    bool surprise = !strcmp(s_expression, "surprised");
+    bool sad = !strcmp(s_expression, "sad") || !strcmp(s_expression, "worried");
+    bool angry = !strcmp(s_expression, "angry");
+    bool curious = !strcmp(s_expression, "curious");
+
+    if (hearts) {
+        lcd_blit_heart(cx - 11, cy - 6, 14, 12, COL_SPARK, COL_FACE);
+        lcd_blit_heart(cx + 11, cy - 6, 14, 12, COL_SPARK, COL_FACE);
+    } else if (closed) {
+        smile_arc(cx - 10, cy - 5, 6, 3, ink, false);
+        smile_arc(cx + 10, cy - 5, 6, 3, ink, false);
+    } else {
+        int er = surprise ? 6 : 4;
+        int ey = cy - 6;
+        lcd_fill_circle(cx - 10, ey, er, ink);
+        lcd_fill_circle(cx + (curious ? 12 : 10), ey - (curious ? 3 : 0), curious ? 5 : er, ink);
+        if (surprise) {
+            lcd_fill_circle(cx - 10, ey, 2, COL_FACE);
+            lcd_fill_circle(cx + 10, ey, 2, COL_FACE);
+        }
+    }
+
+    if (angry) {
+        lcd_fill_rect(cx - 16, cy - 14, 10, 2, ink);
+        lcd_fill_rect(cx + 6, cy - 14, 10, 2, ink);
+    }
+
+    if (surprise) {
+        lcd_fill_circle(cx, cy + 10, 6, ink);
+        lcd_fill_circle(cx, cy + 10, 3, skin);
+    } else if (sad) {
+        smile_arc(cx, cy + 12, 10, 5, ink, true);
+    } else if (!strcmp(s_expression, "thinking") || !strcmp(s_expression, "focused")) {
+        lcd_fill_rect(cx - 8, cy + 10, 16, 2, ink);
+    } else {
+        smile_arc(cx, cy + 9, 12, 6, ink, false);
+    }
+}
+
+static void draw_centered_fast(int y, int scale, uint16_t color, const char *text)
+{
+    if (!text || !text[0]) {
+        return;
+    }
+    int w = lcd_text_width(scale, text);
+    int x = (DESKBOT_LCD_WIDTH - w) / 2;
+    if (x < 4) {
+        x = 4;
+    }
+    lcd_draw_text_fast(x, y, scale, color, text);
+}
+
+#define PROMPT_COLS 22
+#define PROMPT_MAX_LINES 12
+#define PROMPT_LINE_H 18
+#define PROMPT_VIS 4
+
+static int wrap_prompt(const char *text, char lines[][PROMPT_COLS + 1], int max_lines)
+{
+    int n = 0;
+    int col = 0;
+    lines[0][0] = 0;
+    if (!text) {
+        return 0;
+    }
+    for (const char *p = text; *p && n < max_lines; p++) {
+        if (*p == '\n') {
+            lines[n][col] = 0;
+            n++;
+            col = 0;
+            if (n < max_lines) {
+                lines[n][0] = 0;
+            }
+            continue;
+        }
+        if (*p == ' ' && col == 0) {
+            continue;
+        }
+        if (col >= PROMPT_COLS) {
+            lines[n][PROMPT_COLS] = 0;
+            n++;
+            col = 0;
+            if (n >= max_lines) {
+                break;
+            }
+            if (*p == ' ') {
+                lines[n][0] = 0;
+                continue;
+            }
+        }
+        lines[n][col++] = *p;
+        lines[n][col] = 0;
+    }
+    if (n < max_lines && lines[n][0]) {
+        n++;
+    }
+    return n;
+}
+
+static bool prompt_active(void)
+{
+    if (s_ble_status) {
+        if (s_ble_flash_until && esp_timer_get_time() > s_ble_flash_until) {
+            s_ble_status = false;
+            s_ble_flash_until = 0;
+            s_ble_label[0] = 0;
+            s_chat_nova[0] = 0;
+        } else {
+            return true;
+        }
+    }
+    return s_intro || s_chat_nova[0] || s_chat_user[0];
+}
+
+static void draw_ble_pip(bool connected)
+{
+    int x = DESKBOT_LCD_WIDTH - 14;
+    int y = 8;
+    uint16_t c = connected ? COL_ACCENT : COL_DIM;
+    lcd_fill_circle(x, y, 4, c);
+}
+
+static void draw_teleprompter(void)
+{
+    uint16_t ink = COL_FACE;
+    draw_smiley();
+
+    const char *body = s_chat_nova[0] ? s_chat_nova : s_chat_user;
+    if (s_ble_status && s_ble_label[0]) {
+        body = s_ble_label;
+    }
+    if (s_intro && !s_chat_nova[0] && !s_ble_status) {
+        body = "That's me!";
+    }
+    if (!body || !body[0]) {
+        body = "hi!";
+    }
+    if (s_ble_status && s_ble_code[0]) {
+        char combo[48];
+        snprintf(combo, sizeof(combo), "%s %s", s_ble_label[0] ? s_ble_label : "CODE", s_ble_code);
+        ascii_clip(s_chat_nova, sizeof(s_chat_nova), combo);
+        body = s_chat_nova;
+    }
+    char lines[PROMPT_MAX_LINES][PROMPT_COLS + 1];
+    int n = wrap_prompt(body, lines, PROMPT_MAX_LINES);
+    if (n < 1) {
+        draw_centered_fast(100, 2, ink, "hi!");
+        return;
+    }
+    int vis = (n < PROMPT_VIS) ? n : PROMPT_VIS;
+    int extra = n - vis;
+    int off = 0;
+    if (extra > 0) {
+        float t = (esp_timer_get_time() - s_prompt_t0) / 1000000.0f;
+        if (t < 0.0f) {
+            t = 0.0f;
+        }
+        float pause = 0.8f;
+        float travel = extra * 1.4f;
+        float cycle = pause * 2.0f + travel;
+        if (cycle < 1.0f) {
+            cycle = 1.0f;
+        }
+        float u = t - cycle * (float)((int)(t / cycle));
+        if (u < pause) {
+            off = 0;
+        } else if (u > pause + travel) {
+            off = extra;
+        } else {
+            off = (int)((u - pause) / travel * (float)extra + 0.5f);
+            if (off > extra) {
+                off = extra;
+            }
+        }
+    }
+    int y0 = 88;
+    for (int i = 0; i < vis; i++) {
+        int idx = off + i;
+        if (idx >= n) {
+            break;
+        }
+        draw_centered_fast(y0 + i * PROMPT_LINE_H, 2, ink, lines[idx]);
+    }
+}
+
+static void render_locked(void)
+{
+    lcd_fill(COL_BG);
+
+    const char *label = state_label(s_state);
+    if (prompt_active()) {
+        draw_centered_fast(6, 1, COL_ACCENT, label);
+        draw_teleprompter();
+        return;
+    }
+
+    int label_w = lcd_text_width(1, label);
+    lcd_draw_text_glow((DESKBOT_LCD_WIDTH - label_w) / 2, 4, 1, COL_ACCENT, COL_HALO, label);
+    draw_ble_pip(s_ble_pip);
+
+    char emo[16];
+    ascii_clip(emo, sizeof(emo), s_expression);
+    for (char *p = emo; *p; p++) {
+        if (*p >= 'a' && *p <= 'z') {
+            *p = (char)(*p - 32);
+        }
+    }
+    int emo_w = lcd_text_width(1, emo);
+    lcd_draw_text_fast((DESKBOT_LCD_WIDTH - emo_w) / 2, 16, 1, COL_DIM, emo);
+
+    int pupil_dx = 0;
+    int pupil_dy = 0;
+    if (!strcmp(s_gaze, "left")) pupil_dx = -7;
+    else if (!strcmp(s_gaze, "right")) pupil_dx = 7;
+    else if (!strcmp(s_gaze, "down") || !strcmp(s_expression, "shy")) pupil_dy = 6;
+    if (!strcmp(s_expression, "thinking")) {
+        pupil_dy = -7;
+    }
+
+    bool blink = s_blink;
+    draw_eye(50, 90, true, pupil_dx, pupil_dy, blink);
+    draw_eye(DESKBOT_LCD_WIDTH - 50, 90, false, pupil_dx, pupil_dy, blink);
+
+    time_t now = time(NULL);
+    struct tm local;
+    localtime_r(&now, &local);
+    char clock[8];
+    char ampm[4];
+    int hour = local.tm_hour % 12;
+    if (hour == 0) {
+        hour = 12;
+    }
+    if (now < 1700000000) {
+        snprintf(clock, sizeof(clock), "--:--");
+        snprintf(ampm, sizeof(ampm), "  ");
+    } else {
+        snprintf(clock, sizeof(clock), "%d:%02d", hour, local.tm_min);
+        snprintf(ampm, sizeof(ampm), "%s", local.tm_hour >= 12 ? "PM" : "AM");
+    }
+    int clock_w = lcd_clock_width(clock);
+    int clock_x = (DESKBOT_LCD_WIDTH - clock_w) / 2;
+    int clock_y = 48;
+    lcd_draw_clock(clock_x, clock_y, clock, COL_FACE);
+    int ampm_w = lcd_text_width(1, ampm);
+    lcd_draw_text_glow((DESKBOT_LCD_WIDTH - ampm_w) / 2, clock_y + lcd_clock_height() + 3, 1, COL_ACCENT, COL_HALO, ampm);
+    draw_mouth();
+}
+
+static void flush_eyes(void)
+{
+    lcd_flush_rect(6, 36, 100, 120);
+    lcd_flush_rect(DESKBOT_LCD_WIDTH - 106, 36, 100, 120);
+}
+
+static void present(bool full)
+{
+    int64_t now_us = esp_timer_get_time();
+    if (s_intro && (now_us - s_intro_t0) >= (int64_t)INTRO_MS * 1000) {
+        s_intro = false;
+    }
+    if (s_heart) {
+        float t = (now_us - s_heart_t0) / 1000000.0f;
+        if (t >= HEART_MS / 1000.0f) {
+            s_heart = false;
+            render_locked();
+            rgb(0, 18, 22);
+        } else {
+            float dt = s_heart_last_us ? (now_us - s_heart_last_us) / 1000000.0f : 0.016f;
+            if (dt < 0.008f) {
+                dt = 0.016f;
+            }
+            if (dt > 0.05f) {
+                dt = 0.033f;
+            }
+            s_heart_last_us = now_us;
+            draw_heart_scene(t, dt);
+        }
+        lcd_flush();
+        return;
+    }
+    render_locked();
+    if (full) {
+        lcd_flush();
+    } else {
+        flush_eyes();
+    }
+}
+
+static void render_task(void *arg)
+{
+    (void)arg;
+    schedule_blink();
+    int last_minute = -1;
+    TickType_t last_wake = xTaskGetTickCount();
+    while (1) {
+        int64_t now_us = esp_timer_get_time();
+        time_t now = time(NULL);
+        struct tm local;
+        localtime_r(&now, &local);
+        int minute_key = (now < 1700000000) ? -2 : (local.tm_hour * 60 + local.tm_min);
+
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool heart = s_heart;
+        bool prompting = prompt_active();
+        bool want_blink = !heart && !prompting && (now_us >= s_next_blink_us) && (s_state != FACE_SLEEP);
+        bool full = s_dirty || (minute_key != last_minute) || heart;
+        if (prompting && !full) {
+            /* Gentle teleprompter scroll — not 30fps full-screen SPI. */
+            static int64_t last_prompt_us;
+            if (now_us - last_prompt_us > 180000) {
+                full = true;
+                last_prompt_us = now_us;
+            }
+        }
+        if (full) {
+            s_blink = false;
+            present(true);
+            s_dirty = false;
+            last_minute = minute_key;
+        }
+        if (want_blink) {
+            s_blink = true;
+            present(false);
+            xSemaphoreGive(s_lock);
+            vTaskDelay(pdMS_TO_TICKS(120));
+            xSemaphoreTake(s_lock, portMAX_DELAY);
+            s_blink = false;
+            present(false);
+            schedule_blink();
+        }
+        xSemaphoreGive(s_lock);
+        if (heart) {
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(33));
+        } else if (prompting) {
+            last_wake = xTaskGetTickCount();
+            vTaskDelay(pdMS_TO_TICKS(80));
+        } else {
+            last_wake = xTaskGetTickCount();
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+    }
+}
+
+esp_err_t face_init(void)
+{
+    s_lock = xSemaphoreCreateMutex();
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = PIN_RGB,
+        .max_leds = 1,
+    };
+    led_strip_rmt_config_t rmt_config = {
+        .resolution_hz = 10 * 1000 * 1000,
+    };
+    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &s_led));
+    ESP_ERROR_CHECK(lcd_init());
+    setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
+    tzset();
+    s_state = FACE_OFFLINE;
+    rgb(12, 4, 0);
+    xTaskCreate(render_task, "face", 10240, NULL, 6, NULL);
+    ESP_LOGI(TAG, "LCD face + RGB ready");
+    return ESP_OK;
+}
+
+void face_set_state(face_state_t state)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_state = state;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+    switch (state) {
+    case FACE_SLEEP:     rgb(2, 2, 8); break;
+    case FACE_IDLE:      rgb(0, 18, 22); break;
+    case FACE_WAKE:      rgb(20, 40, 12); break;
+    case FACE_LISTENING: rgb(8, 40, 48); break;
+    case FACE_THINKING:  rgb(40, 24, 8); break;
+    case FACE_SPEAKING:  rgb(16, 48, 20); break;
+    case FACE_HAPPY:     rgb(48, 36, 8); break;
+    case FACE_CONFUSED:  rgb(40, 12, 40); break;
+    case FACE_WARNING:   rgb(48, 8, 0); break;
+    case FACE_OFFLINE:   rgb(12, 4, 0); break;
+    }
+}
+
+void face_set_expression(const char *expression, float intensity)
+{
+    (void)intensity;
+    if (!expression) {
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    strlcpy(s_expression, expression, sizeof(s_expression));
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+    if (!strcmp(expression, "happy") || !strcmp(expression, "amused") ||
+        !strcmp(expression, "excited") || !strcmp(expression, "laughing") ||
+        !strcmp(expression, "proud") || !strcmp(expression, "celebrating")) {
+        face_set_state(FACE_HAPPY);
+    } else if (!strcmp(expression, "confused") || !strcmp(expression, "skeptical") ||
+               !strcmp(expression, "worried") || !strcmp(expression, "angry")) {
+        face_set_state(FACE_CONFUSED);
+    } else if (!strcmp(expression, "focused") || !strcmp(expression, "curious") ||
+               !strcmp(expression, "surprised") || !strcmp(expression, "thinking")) {
+        face_set_state(FACE_THINKING);
+    }
+}
+
+void face_set_gaze(const char *gaze)
+{
+    if (!gaze) {
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    strlcpy(s_gaze, gaze, sizeof(s_gaze));
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+}
+
+void face_set_chat(const char *speaker, const char *text)
+{
+    char clipped[192];
+    ascii_clip(clipped, sizeof(clipped), text ? text : "");
+    bool user = speaker && (!strcmp(speaker, "user") || !strcmp(speaker, "you"));
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (user) {
+        strlcpy(s_chat_user, clipped, sizeof(s_chat_user));
+    } else {
+        strlcpy(s_chat_nova, clipped, sizeof(s_chat_nova));
+    }
+    s_prompt_t0 = esp_timer_get_time();
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+}
+
+void face_set_face_id(const char *face)
+{
+    if (!face || !face[0]) {
+        return;
+    }
+    ascii_clip(s_face_id, sizeof(s_face_id), face);
+    char emotion[24];
+    strlcpy(emotion, s_face_id, sizeof(emotion));
+    char *us = strchr(emotion, '_');
+    if (us) {
+        *us = 0;
+    }
+    if (emotion[0]) {
+        face_set_expression(emotion, 0.7f);
+    }
+}
+
+void face_play_intro(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_intro = true;
+    s_intro_t0 = esp_timer_get_time();
+    s_prompt_t0 = s_intro_t0;
+    strlcpy(s_chat_nova, "That's me!", sizeof(s_chat_nova));
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+    face_set_expression("happy", 0.9f);
+}
+
+void face_force_blink(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_blink = true;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+}
+
+void face_play_heart(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_heart = true;
+    s_heart_t0 = esp_timer_get_time();
+    s_heart_last_us = 0;
+    s_dirty = true;
+    heart_reset_parts(DESKBOT_LCD_WIDTH * 0.5f, DESKBOT_LCD_HEIGHT * 0.52f);
+    xSemaphoreGive(s_lock);
+    rgb(48, 6, 18);
+}
+
+void face_apply_unix_time(long unix_sec, const char *tz)
+{
+    struct timeval tv = { .tv_sec = unix_sec, .tv_usec = 0 };
+    settimeofday(&tv, NULL);
+    if (tz && tz[0]) {
+        setenv("TZ", tz, 1);
+        tzset();
+    }
+    s_dirty = true;
+}
+
+face_state_t face_current(void)
+{
+    return s_state;
+}
+
+void face_clear_ble_status(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_ble_status = false;
+    s_ble_flash_until = 0;
+    s_ble_label[0] = 0;
+    s_ble_code[0] = 0;
+    s_chat_nova[0] = 0;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+}
+
+void face_set_ble_status(const char *label, const char *mood, const char *code)
+{
+    if (!label && !mood && !code) {
+        face_clear_ble_status();
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_ble_status = true;
+    s_ble_flash_until = 0;
+    if (label) {
+        ascii_clip(s_ble_label, sizeof(s_ble_label), label);
+        ascii_clip(s_chat_nova, sizeof(s_chat_nova), label);
+    }
+    if (code) {
+        ascii_clip(s_ble_code, sizeof(s_ble_code), code);
+    } else {
+        s_ble_code[0] = 0;
+    }
+    s_prompt_t0 = esp_timer_get_time();
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+    if (mood) {
+        face_set_expression(mood, 0.85f);
+    }
+}
+
+void face_flash_ble_status(const char *label, const char *mood, int ms)
+{
+    face_set_ble_status(label, mood, NULL);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_ble_flash_until = esp_timer_get_time() + (int64_t)ms * 1000;
+    xSemaphoreGive(s_lock);
+}
+
+void face_set_ble_pip(bool connected)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_ble_pip = connected;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+}
