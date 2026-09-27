@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
@@ -25,6 +26,7 @@ class SyncEngine {
   /// Failed AUTH rounds (NACKs). Not reset on HELLO.
   int authFailures;
   bool _authInFlight = false;
+  Completer<bool>? _displayAck;
 
   Future<void> sendHello() async {
     await sendJson(envelopeJson('HELLO', {
@@ -68,6 +70,20 @@ class SyncEngine {
     await sendJson(envelopeJson('DISPLAY', body));
   }
 
+  Future<bool> sendDisplayWait(Map<String, dynamic> body) async {
+    if (!authed) return false;
+    _displayAck = Completer<bool>();
+    try {
+      await sendJson(envelopeJson('DISPLAY', body));
+      return await _displayAck!.future.timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => false,
+      );
+    } finally {
+      _displayAck = null;
+    }
+  }
+
   Future<void> pushNotify({
     required String title,
     required String body,
@@ -100,23 +116,41 @@ class SyncEngine {
   }
 
   Future<void> uploadSceneryRgb565(Uint8List pixels, {required int w, required int h}) async {
-    if (!authed) return;
-    await sendDisplay({'op': 'scenery_begin', 'w': w, 'h': h, 'fmt': 'rgb565'});
-    const chunk = 600;
+    if (!authed) {
+      throw StateError('Not linked — reconnect first');
+    }
+    final began = await sendDisplayWait({'op': 'scenery_begin', 'w': w, 'h': h, 'fmt': 'rgb565'});
+    if (!began) {
+      throw StateError('Deskbot rejected scenery (out of RAM?)');
+    }
+    const chunk = 480;
     for (var off = 0; off < pixels.length; off += chunk) {
       final end = (off + chunk).clamp(0, pixels.length);
       final slice = pixels.sublist(off, end);
-      await sendDisplay({
+      final ok = await sendDisplayWait({
         'op': 'scenery_chunk',
         'off': off,
         'data': base64Encode(slice),
       });
-      await Future<void>.delayed(const Duration(milliseconds: 40));
+      if (!ok) {
+        throw StateError('Scenery upload failed at byte $off');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 60));
     }
-    await sendDisplay({'op': 'scenery_end'});
+    final ended = await sendDisplayWait({'op': 'scenery_end'});
+    if (!ended) {
+      throw StateError('Scenery commit failed');
+    }
   }
 
   Future<void> clearScenery() => sendDisplay({'op': 'scenery_clear'});
+
+  void _completeDisplay(bool ok) {
+    final c = _displayAck;
+    if (c != null && !c.isCompleted) {
+      c.complete(ok);
+    }
+  }
 
   /// Handle inbound JSON map. Returns a short UI hint if any.
   Future<String?> onMessage(Map<String, dynamic> msg) async {
@@ -140,11 +174,23 @@ class SyncEngine {
         }
         return null;
       case 'ACK':
+        if (_displayAck != null) {
+          _completeDisplay(true);
+          return null;
+        }
+        final wasAuthed = authed;
         authed = true;
         authFailures = 0;
-        await sendStateVersion();
-        return 'Linked';
+        if (!wasAuthed) {
+          await sendStateVersion();
+          return 'Linked';
+        }
+        return null;
       case 'NACK':
+        if (_displayAck != null) {
+          _completeDisplay(false);
+          return null;
+        }
         authed = false;
         authFailures++;
         // At most one automatic retry — never loop forever.

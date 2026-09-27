@@ -34,9 +34,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 640, imageQuality: 85);
     if (picked == null) return;
     final bytes = await picked.readAsBytes();
-    await ref.read(bleControllerProvider.notifier).uploadScenery(bytes);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Scenery uploading to Deskbot…')));
+    try {
+      await ref.read(bleControllerProvider.notifier).uploadScenery(bytes);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Scenery on Deskbot')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Scenery failed: $e')),
+        );
+      }
     }
   }
 

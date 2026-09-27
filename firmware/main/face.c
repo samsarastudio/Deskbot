@@ -10,6 +10,7 @@
 
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -55,10 +56,8 @@ static uint16_t *s_scenery;
 static int s_scenery_w;
 static int s_scenery_h;
 static bool s_scenery_ready;
-static uint16_t *s_scenery_staging;
-static int s_scenery_stage_w;
-static int s_scenery_stage_h;
-static size_t s_scenery_stage_bytes;
+static bool s_scenery_loading;
+static size_t s_scenery_bytes;
 
 #define HEART_MS 2400
 #define INTRO_MS 2200
@@ -909,13 +908,14 @@ static void render_task(void *arg)
         }
         if (ble_ui || notify_ui) {
             static int64_t last_ble_us;
-            if (now_us - last_ble_us > 50000) { /* ~20fps soft motion */
+            if (now_us - last_ble_us > 125000) { /* ~8fps status/notify */
                 full = true;
                 last_ble_us = now_us;
             }
-        } else if (!heart && !prompting) {
+        } else if (!heart && !prompting && !s_scenery_ready) {
+            /* Soft ambient only when no photo bg — and rarely. */
             static int64_t last_ambient_us;
-            if (now_us - last_ambient_us > 120000) { /* ~8fps ambient blobs */
+            if (now_us - last_ambient_us > 2000000) {
                 full = true;
                 last_ambient_us = now_us;
             }
@@ -941,13 +941,13 @@ static void render_task(void *arg)
             vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(33));
         } else if (ble_ui || notify_ui) {
             last_wake = xTaskGetTickCount();
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(100));
         } else if (prompting) {
             last_wake = xTaskGetTickCount();
-            vTaskDelay(pdMS_TO_TICKS(80));
+            vTaskDelay(pdMS_TO_TICKS(120));
         } else {
             last_wake = xTaskGetTickCount();
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(150));
         }
     }
 }
@@ -1211,25 +1211,35 @@ void face_clear_calendar(void)
 
 bool face_scenery_begin(int w, int h)
 {
-    if (w < 8 || h < 8 || w > 160 || h > 86) {
+    /* Keep small — C6 SRAM is tight after the 110KB framebuffer. */
+    if (w < 8 || h < 8 || w > 96 || h > 52) {
+        ESP_LOGW(TAG, "scenery size rejected %dx%d", w, h);
         return false;
     }
     size_t bytes = (size_t)w * (size_t)h * sizeof(uint16_t);
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    free(s_scenery_staging);
-    s_scenery_staging = (uint16_t *)malloc(bytes);
-    if (!s_scenery_staging) {
-        s_scenery_stage_w = 0;
-        s_scenery_stage_h = 0;
-        s_scenery_stage_bytes = 0;
+    free(s_scenery);
+    s_scenery = NULL;
+    s_scenery_ready = false;
+    s_scenery_loading = false;
+    s_scenery = (uint16_t *)malloc(bytes);
+    if (!s_scenery) {
+        ESP_LOGE(TAG, "scenery alloc %u failed (free=%u)", (unsigned)bytes,
+                 (unsigned)esp_get_free_heap_size());
+        s_scenery_w = 0;
+        s_scenery_h = 0;
+        s_scenery_bytes = 0;
         xSemaphoreGive(s_lock);
         return false;
     }
-    memset(s_scenery_staging, 0, bytes);
-    s_scenery_stage_w = w;
-    s_scenery_stage_h = h;
-    s_scenery_stage_bytes = bytes;
+    memset(s_scenery, 0, bytes);
+    s_scenery_w = w;
+    s_scenery_h = h;
+    s_scenery_bytes = bytes;
+    s_scenery_loading = true;
     xSemaphoreGive(s_lock);
+    ESP_LOGI(TAG, "scenery begin %dx%d (%u bytes, free=%u)", w, h, (unsigned)bytes,
+             (unsigned)esp_get_free_heap_size());
     return true;
 }
 
@@ -1239,11 +1249,11 @@ bool face_scenery_write(size_t offset, const uint8_t *data, size_t len)
         return false;
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (!s_scenery_staging || offset + len > s_scenery_stage_bytes) {
+    if (!s_scenery || !s_scenery_loading || offset + len > s_scenery_bytes) {
         xSemaphoreGive(s_lock);
         return false;
     }
-    memcpy(((uint8_t *)s_scenery_staging) + offset, data, len);
+    memcpy(((uint8_t *)s_scenery) + offset, data, len);
     xSemaphoreGive(s_lock);
     return true;
 }
@@ -1251,36 +1261,28 @@ bool face_scenery_write(size_t offset, const uint8_t *data, size_t len)
 void face_scenery_commit(void)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (!s_scenery_staging || s_scenery_stage_w < 1) {
+    if (!s_scenery || !s_scenery_loading || s_scenery_w < 1) {
         xSemaphoreGive(s_lock);
+        ESP_LOGW(TAG, "scenery commit with nothing loaded");
         return;
     }
-    free(s_scenery);
-    s_scenery = s_scenery_staging;
-    s_scenery_w = s_scenery_stage_w;
-    s_scenery_h = s_scenery_stage_h;
+    s_scenery_loading = false;
     s_scenery_ready = true;
-    s_scenery_staging = NULL;
-    s_scenery_stage_w = 0;
-    s_scenery_stage_h = 0;
-    s_scenery_stage_bytes = 0;
     s_dirty = true;
     xSemaphoreGive(s_lock);
+    ESP_LOGI(TAG, "scenery ready %dx%d", s_scenery_w, s_scenery_h);
 }
 
 void face_scenery_clear(void)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     free(s_scenery);
-    free(s_scenery_staging);
     s_scenery = NULL;
-    s_scenery_staging = NULL;
     s_scenery_w = 0;
     s_scenery_h = 0;
+    s_scenery_bytes = 0;
     s_scenery_ready = false;
-    s_scenery_stage_w = 0;
-    s_scenery_stage_h = 0;
-    s_scenery_stage_bytes = 0;
+    s_scenery_loading = false;
     s_dirty = true;
     xSemaphoreGive(s_lock);
 }

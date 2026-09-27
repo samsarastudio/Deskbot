@@ -257,23 +257,26 @@ static void handle_display(cJSON *body)
     } else if (!strcmp(op->valuestring, "scenery_chunk")) {
         const cJSON *off = cJSON_GetObjectItem(body, "off");
         const cJSON *data = cJSON_GetObjectItem(body, "data");
-        if (!cJSON_IsNumber(off) || !cJSON_IsString(data)) {
+        if (!cJSON_IsNumber(off) || !cJSON_IsString(data) || !data->valuestring) {
             send_ack(NULL, false);
             return;
         }
-        size_t olen = 0;
-        mbedtls_base64_decode(NULL, 0, &olen, (const unsigned char *)data->valuestring,
-                              strlen(data->valuestring));
-        uint8_t *buf = malloc(olen ? olen : 1);
+        size_t b64_len = strlen(data->valuestring);
+        size_t olen = (b64_len / 4) * 3 + 4;
+        uint8_t *buf = malloc(olen);
         if (!buf) {
+            ESP_LOGE(TAG, "scenery chunk OOM");
             send_ack(NULL, false);
             return;
         }
         size_t written = 0;
         int rc = mbedtls_base64_decode(buf, olen, &written,
-                                       (const unsigned char *)data->valuestring,
-                                       strlen(data->valuestring));
+                                       (const unsigned char *)data->valuestring, b64_len);
         bool ok = (rc == 0) && face_scenery_write((size_t)off->valuedouble, buf, written);
+        if (!ok) {
+            ESP_LOGW(TAG, "scenery chunk fail off=%u len=%u rc=%d",
+                     (unsigned)off->valuedouble, (unsigned)written, rc);
+        }
         free(buf);
         send_ack(NULL, ok);
     } else if (!strcmp(op->valuestring, "scenery_end")) {

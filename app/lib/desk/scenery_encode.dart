@@ -2,8 +2,8 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
-/// Encode a photo into half-res RGB565 for Deskbot scenery (max 160×86).
-Uint8List encodeSceneryRgb565(Uint8List bytes, {int maxW = 160, int maxH = 86}) {
+/// Encode a photo into compact RGB565 for Deskbot scenery (96×52 ≈ 10KB RAM).
+Uint8List encodeSceneryRgb565(Uint8List bytes, {int maxW = 96, int maxH = 52}) {
   final decoded = img.decodeImage(bytes);
   if (decoded == null) {
     throw StateError('Could not decode image');
@@ -30,4 +30,4 @@ Uint8List encodeSceneryRgb565(Uint8List bytes, {int maxW = 160, int maxH = 86}) 
   return out;
 }
 
-({int w, int h}) scenerySize() => (w: 160, h: 86);
+({int w, int h}) scenerySize() => (w: 96, h: 52);

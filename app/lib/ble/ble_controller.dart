@@ -372,6 +372,10 @@ class BleController extends StateNotifier<BleUiState> {
       final hint = await _sync?.onMessage(msg);
       final type = msg['type'];
       if (type == 'ACK' || type == 'STATE_SNAPSHOT' || type == 'DELTA' || type == 'CAPABILITIES') {
+        // DISPLAY op ACKs return null hint — ignore once already linked.
+        if (type == 'ACK' && hint == null && state.phase == BleLinkPhase.connected) {
+          return;
+        }
         if (state.registered == null || state.phase == BleLinkPhase.registering) {
           if (type == 'CAPABILITIES' || type == 'ACK') {
             await _finishRegistration(status: hint ?? 'Linked');
@@ -458,9 +462,12 @@ class BleController extends StateNotifier<BleUiState> {
 
   Future<void> uploadScenery(Uint8List imageBytes) async {
     final sync = _sync;
-    if (sync == null || !sync.authed) return;
-    final pixels = encodeSceneryRgb565(imageBytes);
-    await sync.uploadSceneryRgb565(pixels, w: 160, h: 86);
+    if (sync == null || !sync.authed) {
+      throw StateError('Connect to Deskbot first');
+    }
+    final size = scenerySize();
+    final pixels = encodeSceneryRgb565(imageBytes, maxW: size.w, maxH: size.h);
+    await sync.uploadSceneryRgb565(pixels, w: size.w, h: size.h);
   }
 
   Future<void> clearScenery() => _sync?.clearScenery() ?? Future.value();
