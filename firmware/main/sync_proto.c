@@ -206,7 +206,13 @@ static void handle_display(cJSON *body)
         send_ack(NULL, false);
         return;
     }
-    if (!strcmp(op->valuestring, "notify")) {
+    if (!strcmp(op->valuestring, "layout")) {
+        const cJSON *eyes = cJSON_GetObjectItem(body, "eyes");
+        const cJSON *clock = cJSON_GetObjectItem(body, "clock");
+        bool eyes_on = !cJSON_IsFalse(eyes);
+        face_set_layout(eyes_on, cJSON_IsString(clock) ? clock->valuestring : "center");
+        send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "notify")) {
         const cJSON *title = cJSON_GetObjectItem(body, "title");
         const cJSON *text = cJSON_GetObjectItem(body, "body");
         const cJSON *mood = cJSON_GetObjectItem(body, "mood");

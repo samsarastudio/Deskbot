@@ -2,6 +2,7 @@
 #include "nvs_flash.h"
 
 #include "ble_gatt.h"
+#include "desk_persist.h"
 #include "face.h"
 #include "motion.h"
 #include "ownership.h"
@@ -19,6 +20,9 @@ void app_main(void)
     } else {
         ESP_ERROR_CHECK(err);
     }
+
+    /* Mount SPIFFS before face so saved scenery/layout can restore. */
+    desk_persist_init();
 
     ESP_ERROR_CHECK(face_init());
     face_set_state(FACE_WAKE);

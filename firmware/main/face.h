@@ -42,6 +42,7 @@ void face_show_notify(const char *title, const char *body, const char *mood, int
 void face_clear_notify(void);
 void face_set_calendar(const char *title, const char *when_label);
 void face_clear_calendar(void);
+void face_set_layout(bool eyes, const char *clock_place);
 bool face_scenery_begin(int w, int h);
 bool face_scenery_write(size_t offset, const uint8_t *data, size_t len);
 void face_scenery_commit(void);

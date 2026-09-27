@@ -22,6 +22,9 @@ dependencies:
   image: ^4.2.0
   device_calendar: ^4.3.3
   permission_handler: ^11.3.1
+  shared_preferences: ^2.3.2
+  path_provider: ^2.1.4
+  path: ^1.9.0
 
 dev_dependencies:
   flutter_test:

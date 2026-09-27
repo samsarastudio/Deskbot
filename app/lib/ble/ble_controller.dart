@@ -478,6 +478,18 @@ class BleController extends StateNotifier<BleUiState> {
     await _sync?.pushNotify(title: title, body: body);
   }
 
+  Future<void> pushLayout({required bool eyes, required String clock}) async {
+    await _sync?.pushLayout(eyes: eyes, clock: clock);
+  }
+
+  Future<void> uploadSceneryPixels(Uint8List pixels, {required int w, required int h}) async {
+    final sync = _sync;
+    if (sync == null || !sync.authed) {
+      throw StateError('Connect to Deskbot first');
+    }
+    await sync.uploadSceneryRgb565(pixels, w: w, h: h);
+  }
+
   Future<void> uploadScenery(Uint8List imageBytes) async {
     final sync = _sync;
     if (sync == null || !sync.authed) {

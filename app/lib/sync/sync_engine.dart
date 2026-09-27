@@ -107,6 +107,14 @@ class SyncEngine {
     return sendDisplay({'op': 'calendar', 'title': title, 'when': when ?? ''});
   }
 
+  Future<void> pushLayout({required bool eyes, required String clock}) {
+    return sendDisplay({
+      'op': 'layout',
+      'eyes': eyes,
+      'clock': clock,
+    });
+  }
+
   Future<void> pushTimeSync() {
     final now = DateTime.now();
     return sendDisplay({

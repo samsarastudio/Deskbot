@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "ble_gatt.c"
         "ownership.c"
+        "desk_persist.c"
         "frag.c"
         "session_sm.c"
         "sync_proto.c"
@@ -13,6 +14,7 @@ idf_component_register(
         "."
     REQUIRES
         nvs_flash
+        spiffs
         bt
         json
         mbedtls

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../ble/ble_controller.dart';
+import '../screens/layout_editor_screen.dart';
 import '../sync/rssi_filter.dart';
 import '../theme/nova_theme.dart';
 import '../widgets/ambient_backdrop.dart';
@@ -148,6 +149,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     runSpacing: 8,
                     alignment: WrapAlignment.center,
                     children: [
+                      OutlinedButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const LayoutEditorScreen()),
+                          );
+                        },
+                        child: const Text('Desk layout'),
+                      ),
                       OutlinedButton(
                         onPressed: _busy ? null : () => _run(_composeNotify),
                         child: const Text('Notify desk'),

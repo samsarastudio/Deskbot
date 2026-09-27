@@ -19,6 +19,7 @@
 
 #include "app_config.h"
 #include "demo_scenery.h"
+#include "desk_persist.h"
 #include "lcd.h"
 #include "pins.h"
 
@@ -59,6 +60,9 @@ static int s_scenery_h;
 static bool s_scenery_ready;
 static bool s_scenery_loading;
 static size_t s_scenery_bytes;
+static bool s_eyes_on = true;
+/* 0=off 1=center 2=top 3=bottom 4=left 5=right */
+static int s_clock_place = 1;
 
 #define HEART_MS 2400
 #define INTRO_MS 2200
@@ -780,56 +784,82 @@ static void render_locked(void)
         return;
     }
 
-    int label_w = lcd_text_width(1, label);
-    lcd_draw_text_glow((DESKBOT_LCD_WIDTH - label_w) / 2, 4, 1, COL_ACCENT, COL_HALO, label);
-    draw_ble_pip(s_ble_pip);
+    if (s_eyes_on) {
+        int label_w = lcd_text_width(1, label);
+        lcd_draw_text_glow((DESKBOT_LCD_WIDTH - label_w) / 2, 4, 1, COL_ACCENT, COL_HALO, label);
+        draw_ble_pip(s_ble_pip);
 
-    char emo[16];
-    ascii_clip(emo, sizeof(emo), s_expression);
-    for (char *p = emo; *p; p++) {
-        if (*p >= 'a' && *p <= 'z') {
-            *p = (char)(*p - 32);
+        char emo[16];
+        ascii_clip(emo, sizeof(emo), s_expression);
+        for (char *p = emo; *p; p++) {
+            if (*p >= 'a' && *p <= 'z') {
+                *p = (char)(*p - 32);
+            }
         }
-    }
-    int emo_w = lcd_text_width(1, emo);
-    lcd_draw_text_fast((DESKBOT_LCD_WIDTH - emo_w) / 2, 16, 1, COL_DIM, emo);
+        int emo_w = lcd_text_width(1, emo);
+        lcd_draw_text_fast((DESKBOT_LCD_WIDTH - emo_w) / 2, 16, 1, COL_DIM, emo);
 
-    int pupil_dx = 0;
-    int pupil_dy = 0;
-    if (!strcmp(s_gaze, "left")) pupil_dx = -7;
-    else if (!strcmp(s_gaze, "right")) pupil_dx = 7;
-    else if (!strcmp(s_gaze, "down") || !strcmp(s_expression, "shy")) pupil_dy = 6;
-    if (!strcmp(s_expression, "thinking")) {
-        pupil_dy = -7;
-    }
+        int pupil_dx = 0;
+        int pupil_dy = 0;
+        if (!strcmp(s_gaze, "left")) pupil_dx = -7;
+        else if (!strcmp(s_gaze, "right")) pupil_dx = 7;
+        else if (!strcmp(s_gaze, "down") || !strcmp(s_expression, "shy")) pupil_dy = 6;
+        if (!strcmp(s_expression, "thinking")) {
+            pupil_dy = -7;
+        }
 
-    bool blink = s_blink;
-    draw_eye(50, 90, true, pupil_dx, pupil_dy, blink);
-    draw_eye(DESKBOT_LCD_WIDTH - 50, 90, false, pupil_dx, pupil_dy, blink);
-
-    time_t now = time(NULL);
-    struct tm local;
-    localtime_r(&now, &local);
-    char clock[8];
-    char ampm[4];
-    int hour = local.tm_hour % 12;
-    if (hour == 0) {
-        hour = 12;
-    }
-    if (now < 1700000000) {
-        snprintf(clock, sizeof(clock), "--:--");
-        snprintf(ampm, sizeof(ampm), "  ");
+        bool blink = s_blink;
+        draw_eye(50, 90, true, pupil_dx, pupil_dy, blink);
+        draw_eye(DESKBOT_LCD_WIDTH - 50, 90, false, pupil_dx, pupil_dy, blink);
+        draw_mouth();
     } else {
-        snprintf(clock, sizeof(clock), "%d:%02d", hour, local.tm_min);
-        snprintf(ampm, sizeof(ampm), "%s", local.tm_hour >= 12 ? "PM" : "AM");
+        draw_ble_pip(s_ble_pip);
     }
-    int clock_w = lcd_clock_width(clock);
-    int clock_x = (DESKBOT_LCD_WIDTH - clock_w) / 2;
-    int clock_y = 48;
-    lcd_draw_clock(clock_x, clock_y, clock, COL_FACE);
-    int ampm_w = lcd_text_width(1, ampm);
-    lcd_draw_text_glow((DESKBOT_LCD_WIDTH - ampm_w) / 2, clock_y + lcd_clock_height() + 3, 1, COL_ACCENT, COL_HALO, ampm);
-    draw_mouth();
+
+    if (s_clock_place != 0) {
+        time_t now = time(NULL);
+        struct tm local;
+        localtime_r(&now, &local);
+        char clock[8];
+        char ampm[4];
+        int hour = local.tm_hour % 12;
+        if (hour == 0) {
+            hour = 12;
+        }
+        if (now < 1700000000) {
+            snprintf(clock, sizeof(clock), "--:--");
+            snprintf(ampm, sizeof(ampm), "  ");
+        } else {
+            snprintf(clock, sizeof(clock), "%d:%02d", hour, local.tm_min);
+            snprintf(ampm, sizeof(ampm), "%s", local.tm_hour >= 12 ? "PM" : "AM");
+        }
+        int clock_w = lcd_clock_width(clock);
+        int clock_h = lcd_clock_height();
+        int clock_x = (DESKBOT_LCD_WIDTH - clock_w) / 2;
+        int clock_y = 48;
+        switch (s_clock_place) {
+        case 2: /* top */
+            clock_y = 6;
+            break;
+        case 3: /* bottom */
+            clock_y = DESKBOT_LCD_HEIGHT - clock_h - 22;
+            break;
+        case 4: /* left */
+            clock_x = 6;
+            clock_y = (DESKBOT_LCD_HEIGHT - clock_h) / 2;
+            break;
+        case 5: /* right */
+            clock_x = DESKBOT_LCD_WIDTH - clock_w - 6;
+            clock_y = (DESKBOT_LCD_HEIGHT - clock_h) / 2;
+            break;
+        default: /* center */
+            clock_y = s_eyes_on ? 48 : (DESKBOT_LCD_HEIGHT - clock_h) / 2;
+            break;
+        }
+        lcd_draw_clock(clock_x, clock_y, clock, COL_FACE);
+        int ampm_w = lcd_text_width(1, ampm);
+        lcd_draw_text_glow(clock_x + (clock_w - ampm_w) / 2, clock_y + clock_h + 2, 1, COL_ACCENT, COL_HALO, ampm);
+    }
     draw_calendar_strip();
 }
 
@@ -899,7 +929,7 @@ static void render_task(void *arg)
             notify_ui = false;
             s_dirty = true;
         }
-        bool want_blink = !heart && !prompting && !ble_ui && !notify_ui && (now_us >= s_next_blink_us) && (s_state != FACE_SLEEP);
+        bool want_blink = s_eyes_on && !heart && !prompting && !ble_ui && !notify_ui && (now_us >= s_next_blink_us) && (s_state != FACE_SLEEP);
         /* Notify is static — only redraw when dirty, never in an animation loop. */
         bool full = s_dirty || (minute_key != last_minute) || heart || ble_ui;
         if (prompting && !full && !ble_ui) {
@@ -971,17 +1001,37 @@ esp_err_t face_init(void)
     s_state = FACE_OFFLINE;
     rgb(12, 4, 0);
 
-    /* Built-in dusk hills pixel-art sample (~1KB). */
-    size_t bytes = sizeof(DEMO_SCENERY_PIX);
-    s_scenery = (uint16_t *)malloc(bytes);
-    if (s_scenery) {
-        memcpy(s_scenery, DEMO_SCENERY_PIX, bytes);
-        s_scenery_w = DEMO_SCENERY_W;
-        s_scenery_h = DEMO_SCENERY_H;
-        s_scenery_bytes = bytes;
+    bool eyes = true;
+    int clock_place = 1;
+    if (desk_persist_load_layout(&eyes, &clock_place) == ESP_OK) {
+        s_eyes_on = eyes;
+        s_clock_place = clock_place;
+        ESP_LOGI(TAG, "restored layout eyes=%d clock=%d", eyes ? 1 : 0, clock_place);
+    }
+
+    uint16_t *saved = NULL;
+    int sw = 0, sh = 0;
+    if (desk_persist_load_scenery(&saved, &sw, &sh) == ESP_OK && saved) {
+        s_scenery = saved;
+        s_scenery_w = sw;
+        s_scenery_h = sh;
+        s_scenery_bytes = (size_t)sw * (size_t)sh * sizeof(uint16_t);
         s_scenery_ready = true;
         s_scenery_loading = false;
-        ESP_LOGI(TAG, "demo scenery loaded %dx%d", DEMO_SCENERY_W, DEMO_SCENERY_H);
+        ESP_LOGI(TAG, "restored scenery %dx%d", sw, sh);
+    } else {
+        /* Default demo until the user pushes their own layout. */
+        size_t bytes = sizeof(DEMO_SCENERY_PIX);
+        s_scenery = (uint16_t *)malloc(bytes);
+        if (s_scenery) {
+            memcpy(s_scenery, DEMO_SCENERY_PIX, bytes);
+            s_scenery_w = DEMO_SCENERY_W;
+            s_scenery_h = DEMO_SCENERY_H;
+            s_scenery_bytes = bytes;
+            s_scenery_ready = true;
+            s_scenery_loading = false;
+            ESP_LOGI(TAG, "demo scenery loaded %dx%d", DEMO_SCENERY_W, DEMO_SCENERY_H);
+        }
     }
 
     xTaskCreate(render_task, "face", 10240, NULL, 6, NULL);
@@ -1223,6 +1273,33 @@ void face_clear_calendar(void)
     xSemaphoreGive(s_lock);
 }
 
+void face_set_layout(bool eyes, const char *clock_place)
+{
+    int place = 1;
+    if (clock_place) {
+        if (!strcmp(clock_place, "off") || !strcmp(clock_place, "none")) {
+            place = 0;
+        } else if (!strcmp(clock_place, "top")) {
+            place = 2;
+        } else if (!strcmp(clock_place, "bottom")) {
+            place = 3;
+        } else if (!strcmp(clock_place, "left")) {
+            place = 4;
+        } else if (!strcmp(clock_place, "right")) {
+            place = 5;
+        } else {
+            place = 1; /* center */
+        }
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_eyes_on = eyes;
+    s_clock_place = place;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+    desk_persist_save_layout(eyes, place);
+    ESP_LOGI(TAG, "layout eyes=%d clock=%d (saved)", eyes ? 1 : 0, place);
+}
+
 bool face_scenery_begin(int w, int h)
 {
     /* Half-LCD photo max (160×86 ≈ 27KB). Single buffer only. */
@@ -1283,8 +1360,12 @@ void face_scenery_commit(void)
     s_scenery_loading = false;
     s_scenery_ready = true;
     s_dirty = true;
+    int w = s_scenery_w;
+    int h = s_scenery_h;
+    uint16_t *pix = s_scenery;
     xSemaphoreGive(s_lock);
-    ESP_LOGI(TAG, "scenery ready %dx%d", s_scenery_w, s_scenery_h);
+    desk_persist_save_scenery(pix, w, h);
+    ESP_LOGI(TAG, "scenery ready %dx%d (saved)", w, h);
 }
 
 void face_scenery_clear(void)
@@ -1299,4 +1380,5 @@ void face_scenery_clear(void)
     s_scenery_loading = false;
     s_dirty = true;
     xSemaphoreGive(s_lock);
+    desk_persist_clear_scenery();
 }

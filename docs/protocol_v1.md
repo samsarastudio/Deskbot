@@ -105,7 +105,11 @@ Authenticated session only. Ops:
 { "op": "calendar", "title": "Standup", "when": "3:30p" }
 { "op": "calendar_clear" }
 { "op": "prompt", "speaker": "nova", "text": "Hello from phone" }
-{ "op": "time", "unix": 1710000000, "tz": "EST5EDT,M3.2.0,M11.1.0" }
+{ "op": "layout", "eyes": true, "clock": "center" }
+```
+
+`clock`: `off` | `top` | `center` | `bottom` | `left` | `right`. Layout is stored in NVS; scenery bitmap is stored on SPIFFS and restored on boot.
+
 { "op": "scenery", "w": 32, "h": 18, "fmt": "rgb565", "data": "<base64>" }
 { "op": "scenery_begin", "w": 160, "h": 86, "fmt": "rgb565" }
 { "op": "scenery_chunk", "off": 0, "data": "<base64 rgb565 bytes>" }
