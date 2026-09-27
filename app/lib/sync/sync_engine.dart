@@ -63,6 +63,61 @@ class SyncEngine {
     await sendJson(envelopeJson('STATE_VERSION', {'rev': localRev}));
   }
 
+  Future<void> sendDisplay(Map<String, dynamic> body) async {
+    if (!authed) return;
+    await sendJson(envelopeJson('DISPLAY', body));
+  }
+
+  Future<void> pushNotify({
+    required String title,
+    required String body,
+    String mood = 'curious',
+    int ttlMs = 8000,
+  }) {
+    return sendDisplay({
+      'op': 'notify',
+      'title': title,
+      'body': body,
+      'mood': mood,
+      'ttl_ms': ttlMs,
+    });
+  }
+
+  Future<void> pushCalendar({String? title, String? when}) {
+    if (title == null || title.isEmpty) {
+      return sendDisplay({'op': 'calendar_clear'});
+    }
+    return sendDisplay({'op': 'calendar', 'title': title, 'when': when ?? ''});
+  }
+
+  Future<void> pushTimeSync() {
+    final now = DateTime.now();
+    return sendDisplay({
+      'op': 'time',
+      'unix': now.millisecondsSinceEpoch ~/ 1000,
+      'tz': 'EST5EDT,M3.2.0,M11.1.0',
+    });
+  }
+
+  Future<void> uploadSceneryRgb565(Uint8List pixels, {required int w, required int h}) async {
+    if (!authed) return;
+    await sendDisplay({'op': 'scenery_begin', 'w': w, 'h': h, 'fmt': 'rgb565'});
+    const chunk = 600;
+    for (var off = 0; off < pixels.length; off += chunk) {
+      final end = (off + chunk).clamp(0, pixels.length);
+      final slice = pixels.sublist(off, end);
+      await sendDisplay({
+        'op': 'scenery_chunk',
+        'off': off,
+        'data': base64Encode(slice),
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+    }
+    await sendDisplay({'op': 'scenery_end'});
+  }
+
+  Future<void> clearScenery() => sendDisplay({'op': 'scenery_clear'});
+
   /// Handle inbound JSON map. Returns a short UI hint if any.
   Future<String?> onMessage(Map<String, dynamic> msg) async {
     final type = msg['type'] as String? ?? '';

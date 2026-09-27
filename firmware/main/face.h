@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 
@@ -34,3 +36,13 @@ void face_set_ble_status(const char *label, const char *mood, const char *code);
 void face_flash_ble_status(const char *label, const char *mood, int ms);
 void face_set_ble_pip(bool connected);
 void face_clear_ble_status(void);
+
+/* Phone → desk display surfaces. */
+void face_show_notify(const char *title, const char *body, const char *mood, int ttl_ms);
+void face_clear_notify(void);
+void face_set_calendar(const char *title, const char *when_label);
+void face_clear_calendar(void);
+bool face_scenery_begin(int w, int h);
+bool face_scenery_write(size_t offset, const uint8_t *data, size_t len);
+void face_scenery_commit(void);
+void face_scenery_clear(void);

@@ -6,6 +6,8 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../desk/desk_mirror.dart';
+import '../desk/scenery_encode.dart';
 import '../storage/deskbot_store.dart';
 import '../sync/rssi_filter.dart';
 import '../sync/sync_engine.dart';
@@ -94,6 +96,7 @@ class BleController extends StateNotifier<BleUiState> {
   BluetoothCharacteristic? _evt;
   BluetoothCharacteristic? _session;
   SyncEngine? _sync;
+  DeskMirror? _mirror;
   StreamSubscription? _scanSub;
   StreamSubscription? _connSub;
   StreamSubscription? _notifySub;
@@ -392,6 +395,7 @@ class BleController extends StateNotifier<BleUiState> {
         );
         _reconnectIntent = true;
         await NovaKeepAlive.updateStatus('Connected to NOVA');
+        await _startMirror();
       } else if (type == 'UI_HINT') {
         state = state.copyWith(confirmCode: hint);
       } else if (type == 'NACK') {
@@ -425,6 +429,8 @@ class BleController extends StateNotifier<BleUiState> {
   }
 
   void _onDisconnected() {
+    _mirror?.stop();
+    _mirror = null;
     _rssiTimer?.cancel();
     state = state.copyWith(
       phase: _reconnectIntent && state.registered != null ? BleLinkPhase.reconnecting : BleLinkPhase.away,
@@ -438,8 +444,36 @@ class BleController extends StateNotifier<BleUiState> {
     }
   }
 
+  Future<void> _startMirror() async {
+    final sync = _sync;
+    if (sync == null || !sync.authed) return;
+    await _mirror?.stop();
+    _mirror = DeskMirror(sync);
+    await _mirror!.start();
+  }
+
+  Future<void> pushNotify(String title, String body) async {
+    await _sync?.pushNotify(title: title, body: body);
+  }
+
+  Future<void> uploadScenery(Uint8List imageBytes) async {
+    final sync = _sync;
+    if (sync == null || !sync.authed) return;
+    final pixels = encodeSceneryRgb565(imageBytes);
+    await sync.uploadSceneryRgb565(pixels, w: 160, h: 86);
+  }
+
+  Future<void> clearScenery() => _sync?.clearScenery() ?? Future.value();
+
+  Future<void> openNotificationAccess() =>
+      _mirror?.openNotificationAccess() ?? Future.value();
+
+  Future<void> refreshCalendar() => _mirror?.refreshCalendar() ?? Future.value();
+
   Future<void> removeDeskbot() async {
     _reconnectIntent = false;
+    await _mirror?.stop();
+    _mirror = null;
     await NovaKeepAlive.stop();
     await _device?.disconnect();
     await _store.clear();

@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
@@ -42,6 +43,22 @@ static char s_ble_label[24];
 static char s_ble_code[8];
 static int64_t s_ble_flash_until;
 static bool s_ble_pip;
+
+/* Phone-mirrored surfaces */
+static bool s_notify_on;
+static char s_notify_title[28];
+static char s_notify_body[96];
+static int64_t s_notify_until;
+static char s_cal_title[36];
+static char s_cal_when[20];
+static uint16_t *s_scenery;
+static int s_scenery_w;
+static int s_scenery_h;
+static bool s_scenery_ready;
+static uint16_t *s_scenery_staging;
+static int s_scenery_stage_w;
+static int s_scenery_stage_h;
+static size_t s_scenery_stage_bytes;
 
 #define HEART_MS 2400
 #define INTRO_MS 2200
@@ -580,6 +597,8 @@ static void draw_ble_pip(bool connected)
     lcd_fill_circle(x, y, 4, c);
 }
 
+static void draw_ambient_fluid(void);
+
 /** Soft cyan-ice status screen — setup / linking / recovery. */
 static void draw_ble_status_scene(void)
 {
@@ -628,6 +647,44 @@ static void draw_ble_status_scene(void)
     /* Soft breath ring around bottom */
     int ring_r = (int)(6 + breath * 3.0f);
     lcd_draw_ring(DESKBOT_LCD_WIDTH / 2, DESKBOT_LCD_HEIGHT - 10, ring_r + 2, ring_r, COL_ACCENT);
+}
+
+static void draw_scenery_bg(void)
+{
+    if (!s_scenery_ready || !s_scenery || s_scenery_w < 2 || s_scenery_h < 2) {
+        draw_ambient_fluid();
+        return;
+    }
+    lcd_blit_scaled(s_scenery, s_scenery_w, s_scenery_h);
+}
+
+static void draw_notify_scene(void)
+{
+    draw_scenery_bg();
+    draw_smiley();
+    int panel_y = 88;
+    lcd_fill_round_rect(10, panel_y, DESKBOT_LCD_WIDTH - 20, 72, 14, RGB565(12, 22, 34));
+    lcd_fill_round_rect(12, panel_y + 2, DESKBOT_LCD_WIDTH - 24, 68, 12, RGB565(18, 30, 44));
+    draw_centered_fast(panel_y + 8, 1, COL_ACCENT, s_notify_title[0] ? s_notify_title : "Alert");
+    draw_centered_fast(panel_y + 28, 2, COL_FACE, s_notify_body[0] ? s_notify_body : "");
+}
+
+static void draw_calendar_strip(void)
+{
+    if (!s_cal_title[0]) {
+        return;
+    }
+    char line[56];
+    if (s_cal_when[0]) {
+        snprintf(line, sizeof(line), "%.12s  %.36s", s_cal_when, s_cal_title);
+    } else {
+        snprintf(line, sizeof(line), "%.48s", s_cal_title);
+    }
+    char clipped[40];
+    ascii_clip(clipped, sizeof(clipped), line);
+    int y = DESKBOT_LCD_HEIGHT - 18;
+    lcd_fill_round_rect(8, y - 2, DESKBOT_LCD_WIDTH - 16, 16, 6, RGB565(14, 26, 38));
+    draw_centered_fast(y, 1, COL_GOLD, clipped);
 }
 
 static void draw_teleprompter(void)
@@ -706,12 +763,18 @@ static void render_locked(void)
         return;
     }
 
-    draw_ambient_fluid();
+    if (s_notify_on) {
+        draw_notify_scene();
+        return;
+    }
+
+    draw_scenery_bg();
 
     const char *label = state_label(s_state);
     if (prompt_active()) {
         draw_centered_fast(6, 1, COL_ACCENT, label);
         draw_teleprompter();
+        draw_calendar_strip();
         return;
     }
 
@@ -765,6 +828,7 @@ static void render_locked(void)
     int ampm_w = lcd_text_width(1, ampm);
     lcd_draw_text_glow((DESKBOT_LCD_WIDTH - ampm_w) / 2, clock_y + lcd_clock_height() + 3, 1, COL_ACCENT, COL_HALO, ampm);
     draw_mouth();
+    draw_calendar_strip();
 }
 
 static void flush_eyes(void)
@@ -824,9 +888,18 @@ static void render_task(void *arg)
         bool heart = s_heart;
         bool prompting = prompt_active();
         bool ble_ui = s_ble_status;
-        bool want_blink = !heart && !prompting && !ble_ui && (now_us >= s_next_blink_us) && (s_state != FACE_SLEEP);
-        bool full = s_dirty || (minute_key != last_minute) || heart || ble_ui;
-        if (prompting && !full && !ble_ui) {
+        bool notify_ui = s_notify_on;
+        if (notify_ui && s_notify_until > 0 && now_us >= s_notify_until) {
+            s_notify_on = false;
+            s_notify_title[0] = 0;
+            s_notify_body[0] = 0;
+            s_notify_until = 0;
+            notify_ui = false;
+            s_dirty = true;
+        }
+        bool want_blink = !heart && !prompting && !ble_ui && !notify_ui && (now_us >= s_next_blink_us) && (s_state != FACE_SLEEP);
+        bool full = s_dirty || (minute_key != last_minute) || heart || ble_ui || notify_ui;
+        if (prompting && !full && !ble_ui && !notify_ui) {
             /* Gentle teleprompter scroll — not 30fps full-screen SPI. */
             static int64_t last_prompt_us;
             if (now_us - last_prompt_us > 180000) {
@@ -834,7 +907,7 @@ static void render_task(void *arg)
                 last_prompt_us = now_us;
             }
         }
-        if (ble_ui) {
+        if (ble_ui || notify_ui) {
             static int64_t last_ble_us;
             if (now_us - last_ble_us > 50000) { /* ~20fps soft motion */
                 full = true;
@@ -866,7 +939,7 @@ static void render_task(void *arg)
         xSemaphoreGive(s_lock);
         if (heart) {
             vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(33));
-        } else if (ble_ui) {
+        } else if (ble_ui || notify_ui) {
             last_wake = xTaskGetTickCount();
             vTaskDelay(pdMS_TO_TICKS(50));
         } else if (prompting) {
@@ -1085,6 +1158,129 @@ void face_set_ble_pip(bool connected)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_ble_pip = connected;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+}
+
+void face_show_notify(const char *title, const char *body, const char *mood, int ttl_ms)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_notify_on = true;
+    ascii_clip(s_notify_title, sizeof(s_notify_title), title ? title : "Alert");
+    ascii_clip(s_notify_body, sizeof(s_notify_body), body ? body : "");
+    if (ttl_ms <= 0) {
+        ttl_ms = 8000;
+    }
+    s_notify_until = esp_timer_get_time() + (int64_t)ttl_ms * 1000;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+    if (mood) {
+        face_set_expression(mood, 0.85f);
+    }
+    rgb(20, 36, 48);
+}
+
+void face_clear_notify(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_notify_on = false;
+    s_notify_title[0] = 0;
+    s_notify_body[0] = 0;
+    s_notify_until = 0;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+}
+
+void face_set_calendar(const char *title, const char *when_label)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    ascii_clip(s_cal_title, sizeof(s_cal_title), title ? title : "");
+    ascii_clip(s_cal_when, sizeof(s_cal_when), when_label ? when_label : "");
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+}
+
+void face_clear_calendar(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_cal_title[0] = 0;
+    s_cal_when[0] = 0;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+}
+
+bool face_scenery_begin(int w, int h)
+{
+    if (w < 8 || h < 8 || w > 160 || h > 86) {
+        return false;
+    }
+    size_t bytes = (size_t)w * (size_t)h * sizeof(uint16_t);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    free(s_scenery_staging);
+    s_scenery_staging = (uint16_t *)malloc(bytes);
+    if (!s_scenery_staging) {
+        s_scenery_stage_w = 0;
+        s_scenery_stage_h = 0;
+        s_scenery_stage_bytes = 0;
+        xSemaphoreGive(s_lock);
+        return false;
+    }
+    memset(s_scenery_staging, 0, bytes);
+    s_scenery_stage_w = w;
+    s_scenery_stage_h = h;
+    s_scenery_stage_bytes = bytes;
+    xSemaphoreGive(s_lock);
+    return true;
+}
+
+bool face_scenery_write(size_t offset, const uint8_t *data, size_t len)
+{
+    if (!data || len == 0) {
+        return false;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (!s_scenery_staging || offset + len > s_scenery_stage_bytes) {
+        xSemaphoreGive(s_lock);
+        return false;
+    }
+    memcpy(((uint8_t *)s_scenery_staging) + offset, data, len);
+    xSemaphoreGive(s_lock);
+    return true;
+}
+
+void face_scenery_commit(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (!s_scenery_staging || s_scenery_stage_w < 1) {
+        xSemaphoreGive(s_lock);
+        return;
+    }
+    free(s_scenery);
+    s_scenery = s_scenery_staging;
+    s_scenery_w = s_scenery_stage_w;
+    s_scenery_h = s_scenery_stage_h;
+    s_scenery_ready = true;
+    s_scenery_staging = NULL;
+    s_scenery_stage_w = 0;
+    s_scenery_stage_h = 0;
+    s_scenery_stage_bytes = 0;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+}
+
+void face_scenery_clear(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    free(s_scenery);
+    free(s_scenery_staging);
+    s_scenery = NULL;
+    s_scenery_staging = NULL;
+    s_scenery_w = 0;
+    s_scenery_h = 0;
+    s_scenery_ready = false;
+    s_scenery_stage_w = 0;
+    s_scenery_stage_h = 0;
+    s_scenery_stage_bytes = 0;
     s_dirty = true;
     xSemaphoreGive(s_lock);
 }

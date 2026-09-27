@@ -8,6 +8,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "mbedtls/base64.h"
 #include "mbedtls/md.h"
 
 #include "app_config.h"
@@ -127,6 +128,9 @@ char *sync_proto_device_info_json(void)
     cJSON_AddItemToArray(caps, cJSON_CreateString("face"));
     cJSON_AddItemToArray(caps, cJSON_CreateString("clock"));
     cJSON_AddItemToArray(caps, cJSON_CreateString("sync_v1"));
+    cJSON_AddItemToArray(caps, cJSON_CreateString("notify_v1"));
+    cJSON_AddItemToArray(caps, cJSON_CreateString("calendar_v1"));
+    cJSON_AddItemToArray(caps, cJSON_CreateString("scenery_v1"));
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return out;
@@ -185,7 +189,102 @@ static void handle_register(cJSON *body)
     cJSON *arr = cJSON_AddArrayToObject(caps, "features");
     cJSON_AddItemToArray(arr, cJSON_CreateString("face"));
     cJSON_AddItemToArray(arr, cJSON_CreateString("sync_v1"));
+    cJSON_AddItemToArray(arr, cJSON_CreateString("notify_v1"));
+    cJSON_AddItemToArray(arr, cJSON_CreateString("calendar_v1"));
+    cJSON_AddItemToArray(arr, cJSON_CreateString("scenery_v1"));
     send_type("CAPABILITIES", caps);
+}
+
+static void handle_display(cJSON *body)
+{
+    if (!s_authed) {
+        send_ack(NULL, false);
+        return;
+    }
+    const cJSON *op = cJSON_GetObjectItem(body, "op");
+    if (!cJSON_IsString(op) || !op->valuestring) {
+        send_ack(NULL, false);
+        return;
+    }
+    if (!strcmp(op->valuestring, "notify")) {
+        const cJSON *title = cJSON_GetObjectItem(body, "title");
+        const cJSON *text = cJSON_GetObjectItem(body, "body");
+        const cJSON *mood = cJSON_GetObjectItem(body, "mood");
+        const cJSON *ttl = cJSON_GetObjectItem(body, "ttl_ms");
+        face_show_notify(
+            cJSON_IsString(title) ? title->valuestring : "Alert",
+            cJSON_IsString(text) ? text->valuestring : "",
+            cJSON_IsString(mood) ? mood->valuestring : "curious",
+            cJSON_IsNumber(ttl) ? (int)ttl->valuedouble : 8000);
+        send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "notify_clear")) {
+        face_clear_notify();
+        send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "calendar")) {
+        const cJSON *title = cJSON_GetObjectItem(body, "title");
+        const cJSON *when = cJSON_GetObjectItem(body, "when");
+        if (cJSON_IsString(title) && title->valuestring && title->valuestring[0]) {
+            face_set_calendar(title->valuestring,
+                              cJSON_IsString(when) ? when->valuestring : "");
+        } else {
+            face_clear_calendar();
+        }
+        send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "calendar_clear")) {
+        face_clear_calendar();
+        send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "prompt")) {
+        const cJSON *text = cJSON_GetObjectItem(body, "text");
+        const cJSON *speaker = cJSON_GetObjectItem(body, "speaker");
+        if (cJSON_IsString(text)) {
+            face_set_chat(cJSON_IsString(speaker) ? speaker->valuestring : "nova", text->valuestring);
+        }
+        send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "time")) {
+        const cJSON *unix_sec = cJSON_GetObjectItem(body, "unix");
+        const cJSON *tz = cJSON_GetObjectItem(body, "tz");
+        if (cJSON_IsNumber(unix_sec)) {
+            face_apply_unix_time((long)unix_sec->valuedouble,
+                                 cJSON_IsString(tz) ? tz->valuestring : NULL);
+        }
+        send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "scenery_begin")) {
+        const cJSON *w = cJSON_GetObjectItem(body, "w");
+        const cJSON *h = cJSON_GetObjectItem(body, "h");
+        int wi = cJSON_IsNumber(w) ? (int)w->valuedouble : 0;
+        int hi = cJSON_IsNumber(h) ? (int)h->valuedouble : 0;
+        send_ack(NULL, face_scenery_begin(wi, hi));
+    } else if (!strcmp(op->valuestring, "scenery_chunk")) {
+        const cJSON *off = cJSON_GetObjectItem(body, "off");
+        const cJSON *data = cJSON_GetObjectItem(body, "data");
+        if (!cJSON_IsNumber(off) || !cJSON_IsString(data)) {
+            send_ack(NULL, false);
+            return;
+        }
+        size_t olen = 0;
+        mbedtls_base64_decode(NULL, 0, &olen, (const unsigned char *)data->valuestring,
+                              strlen(data->valuestring));
+        uint8_t *buf = malloc(olen ? olen : 1);
+        if (!buf) {
+            send_ack(NULL, false);
+            return;
+        }
+        size_t written = 0;
+        int rc = mbedtls_base64_decode(buf, olen, &written,
+                                       (const unsigned char *)data->valuestring,
+                                       strlen(data->valuestring));
+        bool ok = (rc == 0) && face_scenery_write((size_t)off->valuedouble, buf, written);
+        free(buf);
+        send_ack(NULL, ok);
+    } else if (!strcmp(op->valuestring, "scenery_end")) {
+        face_scenery_commit();
+        send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "scenery_clear")) {
+        face_scenery_clear();
+        send_ack(NULL, true);
+    } else {
+        send_ack(NULL, false);
+    }
 }
 
 static void handle_auth(cJSON *body)
@@ -329,6 +428,8 @@ void sync_proto_on_message(const uint8_t *data, size_t len)
         handle_snapshot_or_delta(body, true);
     } else if (!strcmp(type->valuestring, "DELTA")) {
         handle_snapshot_or_delta(body, false);
+    } else if (!strcmp(type->valuestring, "DISPLAY")) {
+        handle_display(body);
     } else if (!strcmp(type->valuestring, "ACK")) {
         if (session_sm_get() == SM_SYNCING) {
             session_sm_on_sync_done();

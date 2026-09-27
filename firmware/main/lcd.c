@@ -478,6 +478,28 @@ void lcd_blit_heart(int cx, int cy, int w, int h, uint16_t core, uint16_t halo)
     }
 }
 
+void lcd_blit_scaled(const uint16_t *src, int sw, int sh)
+{
+    if (!s_fb || !src || sw < 1 || sh < 1) {
+        return;
+    }
+    for (int y = 0; y < DESKBOT_LCD_HEIGHT; y++) {
+        int sy = y * sh / DESKBOT_LCD_HEIGHT;
+        if (sy >= sh) {
+            sy = sh - 1;
+        }
+        const uint16_t *srow = src + sy * sw;
+        uint16_t *drow = s_fb + y * DESKBOT_LCD_WIDTH;
+        for (int x = 0; x < DESKBOT_LCD_WIDTH; x++) {
+            int sx = x * sw / DESKBOT_LCD_WIDTH;
+            if (sx >= sw) {
+                sx = sw - 1;
+            }
+            drow[x] = srow[sx];
+        }
+    }
+}
+
 void lcd_spark(int cx, int cy, int r, uint16_t color)
 {
     if (r < 1) {

@@ -28,6 +28,12 @@
 	<string>NOVA uses Bluetooth to find and stay connected to your Deskbot.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>NOVA uses Bluetooth to find and stay connected to your Deskbot.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>NOVA shows your next calendar event on the Deskbot screen.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>NOVA shows your next calendar event on the Deskbot screen.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>NOVA uploads a scenery photo to your Deskbot background.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

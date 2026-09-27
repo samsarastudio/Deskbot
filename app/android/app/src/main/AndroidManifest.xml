@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <application
@@ -39,6 +41,15 @@
             android:foregroundServiceType="connectedDevice"
             android:exported="false"
             android:stopWithTask="false" />
+        <service
+            android:name=".NovaNotificationListener"
+            android:label="NOVA Desk mirror"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
         <meta-data android:name="flutterEmbedding" android:value="2" />
     </application>
 </manifest>

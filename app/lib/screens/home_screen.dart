@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../ble/ble_controller.dart';
 import '../sync/rssi_filter.dart';
@@ -7,11 +10,68 @@ import '../theme/nova_theme.dart';
 import '../widgets/ambient_backdrop.dart';
 import '../widgets/nova_mascot.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _busy = false;
+
+  Future<void> _run(Future<void> Function() fn) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await fn();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pickScenery() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 640, imageQuality: 85);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    await ref.read(bleControllerProvider.notifier).uploadScenery(bytes);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Scenery uploading to Deskbot…')));
+    }
+  }
+
+  Future<void> _composeNotify() async {
+    final title = TextEditingController(text: 'NOVA');
+    final body = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final text = Theme.of(ctx).textTheme;
+        return AlertDialog(
+          backgroundColor: NovaColors.panelSolid,
+          title: Text('Show on Deskbot', style: text.titleLarge),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: title, decoration: const InputDecoration(labelText: 'Title')),
+              const SizedBox(height: 8),
+              TextField(controller: body, decoration: const InputDecoration(labelText: 'Message'), maxLines: 2),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
+          ],
+        );
+      },
+    );
+    if (ok == true && body.text.trim().isNotEmpty) {
+      await ref.read(bleControllerProvider.notifier).pushNotify(title.text.trim(), body.text.trim());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final s = ref.watch(bleControllerProvider);
     final connected = s.phase == BleLinkPhase.connected;
     final text = Theme.of(context).textTheme;
@@ -60,9 +120,9 @@ class HomeScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(s.registered?.deviceId ?? 'Deskbot', style: text.bodyMedium),
-                const SizedBox(height: 28),
-                NovaMascot(mood: mood, size: 230, pulse: connected),
-                const SizedBox(height: 22),
+                const SizedBox(height: 20),
+                NovaMascot(mood: mood, size: 180, pulse: connected),
+                const SizedBox(height: 16),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 380),
                   child: Text(
@@ -71,6 +131,43 @@ class HomeScreen extends ConsumerWidget {
                     style: text.titleLarge,
                   ),
                 ),
+                if (connected) ...[
+                  const SizedBox(height: 18),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      OutlinedButton(
+                        onPressed: _busy ? null : () => _run(_composeNotify),
+                        child: const Text('Notify desk'),
+                      ),
+                      OutlinedButton(
+                        onPressed: _busy ? null : () => _run(_pickScenery),
+                        child: const Text('Upload scenery'),
+                      ),
+                      OutlinedButton(
+                        onPressed: _busy
+                            ? null
+                            : () => _run(() => ref.read(bleControllerProvider.notifier).refreshCalendar()),
+                        child: const Text('Calendar'),
+                      ),
+                      if (Platform.isAndroid)
+                        OutlinedButton(
+                          onPressed: _busy
+                              ? null
+                              : () => _run(() => ref.read(bleControllerProvider.notifier).openNotificationAccess()),
+                          child: const Text('Phone alerts'),
+                        ),
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => _run(() => ref.read(bleControllerProvider.notifier).clearScenery()),
+                        child: const Text('Clear scenery'),
+                      ),
+                    ],
+                  ),
+                ],
                 const Spacer(),
                 OutlinedButton(
                   onPressed: () => ref.read(bleControllerProvider.notifier).startScan(autoConnectRegistered: true),

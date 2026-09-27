@@ -4,7 +4,7 @@
 #define DESKBOT_LCD_WIDTH       320
 #define DESKBOT_LCD_HEIGHT      172
 
-#define DESKBOT_FW_VERSION      "1.0.0"
+#define DESKBOT_FW_VERSION      "1.1.0"
 #define DESKBOT_MODEL           "deskbot-c6-147"
 #define DESKBOT_PROTOCOL_VER    1
 #define DESKBOT_ADV_NAME_SETUP  "NOVA-Setup"

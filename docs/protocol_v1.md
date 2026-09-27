@@ -93,6 +93,26 @@ Transport: write assembled bytes to **Command RX**; notifications on **Event TX*
 | `HEARTBEAT` | optional | App-level liveness |
 | `UI_HINT` | Deskbot→App | LCD confirmation code / status |
 | `FACTORY_RESET` | App→Deskbot | Clear ownership (authenticated) |
+| `DISPLAY` | App→Deskbot | Notify / calendar / scenery / clock sync (auth required) |
+
+### DISPLAY body
+
+Authenticated session only. Ops:
+
+```json
+{ "op": "notify", "title": "Messages", "body": "Lunch at noon?", "mood": "curious", "ttl_ms": 8000 }
+{ "op": "notify_clear" }
+{ "op": "calendar", "title": "Standup", "when": "3:30p" }
+{ "op": "calendar_clear" }
+{ "op": "prompt", "speaker": "nova", "text": "Hello from phone" }
+{ "op": "time", "unix": 1710000000, "tz": "EST5EDT,M3.2.0,M11.1.0" }
+{ "op": "scenery_begin", "w": 160, "h": 86, "fmt": "rgb565" }
+{ "op": "scenery_chunk", "off": 0, "data": "<base64 rgb565 bytes>" }
+{ "op": "scenery_end" }
+{ "op": "scenery_clear" }
+```
+
+Scenery is half-resolution RGB565 (max 160×86) uploaded in base64 chunks, then upscaled on the LCD as the face background.
 
 ### HELLO body
 
@@ -130,7 +150,7 @@ JSON string:
   "protocol": 1,
   "device_id": "nova-a1b2c3d4",
   "registered": false,
-  "capabilities": ["face", "clock", "sync_v1"]
+  "capabilities": ["face", "clock", "sync_v1", "notify_v1", "calendar_v1", "scenery_v1"]
 }
 ```
 
