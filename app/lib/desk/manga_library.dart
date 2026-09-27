@@ -24,6 +24,12 @@ class MangaLibraryItem {
 
 const mangaLibrary = <MangaLibraryItem>[
   MangaLibraryItem(
+    id: 'ltx_kamehameha',
+    title: 'LTX Kamehameha',
+    assetGif: 'assets/manga/ltx_kamehameha.gif',
+    assetPreview: 'assets/manga/manga_01_rooftop.png',
+  ),
+  MangaLibraryItem(
     id: 'rooftop_rain',
     title: 'Rooftop Rain',
     assetGif: 'assets/manga/rooftop_rain.gif',

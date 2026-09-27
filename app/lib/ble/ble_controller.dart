@@ -104,7 +104,12 @@ class BleController extends StateNotifier<BleUiState> {
   int _msgId = 1;
   bool _reconnectIntent = false;
   Timer? _rssiTimer;
+  Timer? _reconnectTimer;
   bool _connecting = false;
+  bool _scanInFlight = false;
+  bool _reconnectKickInFlight = false;
+  bool _bootstrapDone = false;
+  int _reconnectBackoffSec = 1;
 
   Future<void> _bootstrap() async {
     final reg = await _store.load();
@@ -112,8 +117,9 @@ class BleController extends StateNotifier<BleUiState> {
       state = state.copyWith(registered: reg, phase: BleLinkPhase.away, status: 'Will reconnect automatically');
       _reconnectIntent = true;
       await NovaKeepAlive.start(status: 'Keeping NOVA nearby');
-      await startScan(autoConnectRegistered: true);
+      await _beginReconnect(reason: 'bootstrap');
     }
+    _bootstrapDone = true;
   }
 
   void _onKeepAliveData(Object data) {
@@ -124,25 +130,83 @@ class BleController extends StateNotifier<BleUiState> {
     }
   }
 
+  bool get _linkBusy =>
+      _connecting ||
+      _scanInFlight ||
+      _reconnectKickInFlight ||
+      state.phase == BleLinkPhase.connecting ||
+      state.phase == BleLinkPhase.authenticating ||
+      state.phase == BleLinkPhase.syncing ||
+      state.phase == BleLinkPhase.registering;
+
+  bool get _isLinked => state.phase == BleLinkPhase.connected;
+
   Future<void> _ensureLinkFromBackground() async {
     if (!_reconnectIntent || state.registered == null) return;
-    if (_connecting) return;
-    final connected = state.phase == BleLinkPhase.connected ||
-        state.phase == BleLinkPhase.authenticating ||
-        state.phase == BleLinkPhase.syncing ||
-        state.phase == BleLinkPhase.connecting;
-    if (connected) {
-      await NovaKeepAlive.updateStatus(
-        state.phase == BleLinkPhase.connected ? 'Connected to NOVA' : 'Linking…',
-      );
+    if (_isLinked) {
+      await NovaKeepAlive.updateStatus('Connected to NOVA');
       return;
     }
-    if (state.phase == BleLinkPhase.scanning || state.phase == BleLinkPhase.reconnecting) {
+    if (_linkBusy) {
+      await NovaKeepAlive.updateStatus('Linking…');
       return;
     }
-    state = state.copyWith(phase: BleLinkPhase.reconnecting, status: 'Reconnecting…', clearError: true);
-    await NovaKeepAlive.updateStatus('Looking for NOVA…');
-    await startScan(autoConnectRegistered: true);
+    await _beginReconnect(reason: 'keepalive');
+  }
+
+  Future<void> _beginReconnect({String reason = 'manual'}) async {
+    if (!_reconnectIntent || state.registered == null) return;
+    if (_isLinked || _connecting || _scanInFlight || _reconnectKickInFlight) return;
+    _reconnectKickInFlight = true;
+    _reconnectTimer?.cancel();
+
+    try {
+      state = state.copyWith(phase: BleLinkPhase.reconnecting, status: 'Reconnecting…', clearError: true);
+      await NovaKeepAlive.updateStatus('Looking for NOVA…');
+
+      // Prefer a direct connect to the last known peripheral — no scan needed.
+      final rid = state.registered!.remoteId;
+      if (rid != null && rid.isNotEmpty) {
+        try {
+          final device = BluetoothDevice.fromId(rid);
+          await connect(device, existing: state.registered);
+          if (_isLinked ||
+              state.phase == BleLinkPhase.authenticating ||
+              state.phase == BleLinkPhase.syncing ||
+              state.phase == BleLinkPhase.connecting) {
+            _reconnectBackoffSec = 1;
+            return;
+          }
+        } catch (e) {
+          debugPrint('direct reconnect ($reason) failed: $e');
+        }
+      }
+
+      // connect() already scheduled a retry on failure — only scan if still idle.
+      if (!_connecting && !_isLinked && state.phase != BleLinkPhase.authenticating) {
+        await startScan(autoConnectRegistered: true);
+      }
+    } finally {
+      _reconnectKickInFlight = false;
+    }
+  }
+
+  void _scheduleReconnectRetry() {
+    if (!_reconnectIntent || state.registered == null) return;
+    if (_isLinked || _connecting || _scanInFlight) return;
+    _reconnectTimer?.cancel();
+    final delay = Duration(seconds: _reconnectBackoffSec.clamp(1, 20));
+    _reconnectBackoffSec = (_reconnectBackoffSec * 2).clamp(1, 20);
+    state = state.copyWith(
+      phase: BleLinkPhase.away,
+      status: 'Will reconnect automatically',
+    );
+    NovaKeepAlive.updateStatus('Looking for NOVA…');
+    _reconnectTimer = Timer(delay, () {
+      if (!_reconnectIntent || state.registered == null) return;
+      if (_isLinked || _connecting || _scanInFlight || _reconnectKickInFlight) return;
+      _beginReconnect(reason: 'retry');
+    });
   }
 
   Future<void> onAppBackgrounded() async {
@@ -154,86 +218,136 @@ class BleController extends StateNotifier<BleUiState> {
   }
 
   Future<void> onAppResumed() async {
+    // Cold open can fire resumed before secure-storage load finishes.
+    if (!_bootstrapDone) {
+      for (var i = 0; i < 40 && !_bootstrapDone; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
     if (state.registered == null) return;
     _reconnectIntent = true;
+    _reconnectBackoffSec = 1;
     await NovaKeepAlive.start(status: 'Looking after NOVA');
-    await _ensureLinkFromBackground();
+    await _beginReconnect(reason: 'resume');
     if (state.phase == BleLinkPhase.connected) {
       await _mirror?.refreshCalendar();
     }
   }
 
   Future<void> startScan({bool autoConnectRegistered = false}) async {
-    if (_connecting) return;
+    if (_connecting || _scanInFlight) return;
+    _scanInFlight = true;
     state = state.copyWith(
       phase: autoConnectRegistered ? BleLinkPhase.reconnecting : BleLinkPhase.scanning,
       status: autoConnectRegistered ? 'Reconnecting…' : 'Looking for your Deskbot…',
       clearError: true,
     );
-    await FlutterBluePlus.adapterState.where((s) => s == BluetoothAdapterState.on).first.timeout(
-          const Duration(seconds: 8),
-          onTimeout: () => BluetoothAdapterState.off,
-        );
-    if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
-      state = state.copyWith(phase: BleLinkPhase.recovery, error: 'Bluetooth is required', status: 'Turn on Bluetooth');
-      return;
-    }
-    await _scanSub?.cancel();
-    final found = <String, ScanResult>{};
-    await FlutterBluePlus.startScan(
-      withServices: [Guid(DeskbotBle.serviceUuid)],
-      timeout: const Duration(seconds: 12),
-    );
-    _scanSub = FlutterBluePlus.scanResults.listen((results) async {
-      for (final r in results) {
-        found[r.device.remoteId.str] = r;
-      }
-      final list = found.values.toList()
-        ..sort((a, b) => b.rssi.compareTo(a.rssi));
-      if (!autoConnectRegistered) {
-        state = state.copyWith(devices: list, phase: list.isEmpty ? BleLinkPhase.scanning : BleLinkPhase.found);
-      } else {
-        state = state.copyWith(devices: list);
-      }
-
-      if (autoConnectRegistered && state.registered != null) {
-        ScanResult? target;
-        final rid = state.registered!.remoteId;
-        if (rid != null) {
-          target = list.cast<ScanResult?>().firstWhere(
-                (r) => r?.device.remoteId.str == rid,
-                orElse: () => null,
-              );
-        }
-        target ??= list.isNotEmpty ? list.first : null;
-        if (target != null) {
-          await FlutterBluePlus.stopScan();
-          await connect(target.device, existing: state.registered);
-        }
+    try {
+      await FlutterBluePlus.adapterState.where((s) => s == BluetoothAdapterState.on).first.timeout(
+            const Duration(seconds: 8),
+            onTimeout: () => BluetoothAdapterState.off,
+          );
+      if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
+        state = state.copyWith(phase: BleLinkPhase.recovery, error: 'Bluetooth is required', status: 'Turn on Bluetooth');
+        if (autoConnectRegistered) _scheduleReconnectRetry();
         return;
       }
 
-      if (!autoConnectRegistered && list.length == 1) {
-        state = state.copyWith(status: 'Deskbot found');
+      await _scanSub?.cancel();
+      final found = <String, ScanResult>{};
+      var handedOff = false;
+
+      // Listen before starting so early advertisements are not missed.
+      _scanSub = FlutterBluePlus.scanResults.listen((results) async {
+        if (handedOff || _connecting) return;
+        for (final r in results) {
+          found[r.device.remoteId.str] = r;
+        }
+        final list = found.values.toList()
+          ..sort((a, b) => b.rssi.compareTo(a.rssi));
+        if (!autoConnectRegistered) {
+          state = state.copyWith(devices: list, phase: list.isEmpty ? BleLinkPhase.scanning : BleLinkPhase.found);
+        } else {
+          state = state.copyWith(devices: list);
+        }
+
+        if (autoConnectRegistered && state.registered != null) {
+          ScanResult? target;
+          final rid = state.registered!.remoteId;
+          if (rid != null) {
+            target = list.cast<ScanResult?>().firstWhere(
+                  (r) => r?.device.remoteId.str == rid,
+                  orElse: () => null,
+                );
+          }
+          target ??= list.isNotEmpty ? list.first : null;
+          if (target != null) {
+            handedOff = true;
+            await FlutterBluePlus.stopScan();
+            await connect(target.device, existing: state.registered);
+          }
+          return;
+        }
+
+        if (!autoConnectRegistered && list.length == 1) {
+          state = state.copyWith(status: 'Deskbot found');
+        }
+      });
+
+      await FlutterBluePlus.startScan(
+        withServices: [Guid(DeskbotBle.serviceUuid)],
+        timeout: const Duration(seconds: 12),
+      );
+
+      // Wait until the timed scan actually ends so we can retry if needed.
+      // isScanning is a broadcast stream — if already stopped, don't wait forever.
+      if (FlutterBluePlus.isScanningNow) {
+        await FlutterBluePlus.isScanning.where((v) => v == false).first.timeout(
+              const Duration(seconds: 15),
+              onTimeout: () => false,
+            );
+      } else {
+        // Platform may report stopped before our check; give the listener a beat.
+        await Future<void>.delayed(const Duration(milliseconds: 200));
       }
-    });
+      await _scanSub?.cancel();
+      _scanSub = null;
+
+      if (autoConnectRegistered &&
+          _reconnectIntent &&
+          state.registered != null &&
+          !_connecting &&
+          !_isLinked &&
+          state.phase != BleLinkPhase.authenticating &&
+          state.phase != BleLinkPhase.syncing &&
+          state.phase != BleLinkPhase.connecting) {
+        _scheduleReconnectRetry();
+      }
+    } catch (e) {
+      debugPrint('startScan error: $e');
+      if (autoConnectRegistered) _scheduleReconnectRetry();
+    } finally {
+      _scanInFlight = false;
+    }
   }
 
   Future<void> stopScan() async {
     await FlutterBluePlus.stopScan();
     await _scanSub?.cancel();
+    _scanSub = null;
+    _scanInFlight = false;
   }
 
   Future<void> connect(BluetoothDevice device, {RegisteredDeskbot? existing}) async {
     if (_connecting) return;
     _connecting = true;
+    _reconnectTimer?.cancel();
     await stopScan();
     _device = device;
     state = state.copyWith(phase: BleLinkPhase.connecting, status: 'Connecting');
     try {
-      // autoConnect helps Android keep a low-energy retry path in background.
-      // Direct connect after scan is more reliable than autoConnect race;
-      // background keep-alive + scan handles re-link when the app is closed.
+      // Direct connect after scan / known remoteId is more reliable than autoConnect race;
+      // keepalive + retry loop handles re-link when the app is closed or backgrounded.
       await device.connect(
         timeout: const Duration(seconds: 15),
         autoConnect: false,
@@ -284,12 +398,17 @@ class BleController extends StateNotifier<BleUiState> {
         // Ask desk to show pairing code on its LCD only — never mirror to phone UI.
         await _session?.write(utf8.encode(jsonEncode({'op': 'show_code'})), withoutResponse: false);
       } else {
+        _reconnectBackoffSec = 1;
         state = state.copyWith(phase: BleLinkPhase.authenticating, status: 'Authenticating');
         await NovaKeepAlive.updateStatus('Authenticating…');
         await _sync!.sendHello();
       }
     } catch (e) {
       state = state.copyWith(phase: BleLinkPhase.recovery, error: '$e', status: 'Connection failed');
+      // Retry after finally clears _connecting — scheduling here would no-op.
+      if (_reconnectIntent && existing != null) {
+        Future<void>.microtask(_scheduleReconnectRetry);
+      }
     } finally {
       _connecting = false;
     }
@@ -418,6 +537,8 @@ class BleController extends StateNotifier<BleUiState> {
           clearError: true,
         );
         _reconnectIntent = true;
+        _reconnectBackoffSec = 1;
+        _reconnectTimer?.cancel();
         await NovaKeepAlive.updateStatus('Connected to NOVA');
         await _startMirror();
       } else if (type == 'UI_HINT') {
@@ -456,14 +577,13 @@ class BleController extends StateNotifier<BleUiState> {
     _mirror = null;
     _rssiTimer?.cancel();
     state = state.copyWith(
-      phase: _reconnectIntent && state.registered != null ? BleLinkPhase.reconnecting : BleLinkPhase.away,
-      status: _reconnectIntent ? 'Reconnecting…' : 'Deskbot away',
+      phase: BleLinkPhase.away,
+      status: _reconnectIntent ? 'Will reconnect automatically' : 'Deskbot away',
     );
     NovaKeepAlive.updateStatus(_reconnectIntent ? 'Looking for NOVA…' : 'NOVA away');
     if (_reconnectIntent && state.registered != null) {
-      Future<void>.delayed(const Duration(milliseconds: 800), () {
-        startScan(autoConnectRegistered: true);
-      });
+      _reconnectBackoffSec = 1;
+      _scheduleReconnectRetry();
     }
   }
 
@@ -500,6 +620,17 @@ class BleController extends StateNotifier<BleUiState> {
     await sync.uploadAnimFrames(frames, w: kAnimW, h: kAnimH, fps: 8);
   }
 
+  Future<void> uploadAnimFrames(List<Uint8List> frames, {int fps = 8}) async {
+    final sync = _sync;
+    if (sync == null || !sync.authed) {
+      throw StateError('Connect to Deskbot first');
+    }
+    if (frames.isEmpty) {
+      throw StateError('No animation frames');
+    }
+    await sync.uploadAnimFrames(frames, w: kAnimW, h: kAnimH, fps: fps);
+  }
+
   Future<void> uploadScenery(Uint8List imageBytes) async {
     final sync = _sync;
     if (sync == null || !sync.authed) {
@@ -517,11 +648,24 @@ class BleController extends StateNotifier<BleUiState> {
 
   Future<void> refreshCalendar() => _mirror?.refreshCalendar() ?? Future.value();
 
+  Future<void> reconnectNow() async {
+    if (state.registered == null) {
+      await startScan();
+      return;
+    }
+    _reconnectIntent = true;
+    _reconnectBackoffSec = 1;
+    await _beginReconnect(reason: 'manual');
+  }
+
   Future<void> removeDeskbot() async {
     _reconnectIntent = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     await _mirror?.stop();
     _mirror = null;
     await NovaKeepAlive.stop();
+    await stopScan();
     await _device?.disconnect();
     await _store.clear();
     state = const BleUiState(phase: BleLinkPhase.idle, status: '');
@@ -546,6 +690,7 @@ class BleController extends StateNotifier<BleUiState> {
   @override
   void dispose() {
     NovaKeepAlive.stopListening();
+    _reconnectTimer?.cancel();
     _scanSub?.cancel();
     _connSub?.cancel();
     _notifySub?.cancel();

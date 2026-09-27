@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 venv/
 .env
+tools/comfy/.env
+tools/comfy/out/
 *.db
 *.sqlite
 brain/data/

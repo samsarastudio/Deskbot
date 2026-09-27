@@ -21,6 +21,7 @@
 #include "demo_scenery.h"
 #include "desk_persist.h"
 #include "lcd.h"
+#include "manga_boot.h"
 #include "pins.h"
 
 static const char *TAG = "face";
@@ -878,7 +879,9 @@ static void render_locked(void)
         int ampm_w = lcd_text_width(1, ampm);
         lcd_draw_text_glow(clock_x + (clock_w - ampm_w) / 2, clock_y + clock_h + 2, 1, COL_ACCENT, COL_HALO, ampm);
     }
-    draw_calendar_strip();
+    if (s_eyes_on || s_clock_place != 0) {
+        draw_calendar_strip();
+    }
 }
 
 static void flush_eyes(void)
@@ -1028,51 +1031,28 @@ esp_err_t face_init(void)
     s_state = FACE_OFFLINE;
     rgb(12, 4, 0);
 
-    bool eyes = true;
-    int clock_place = 1;
-    if (desk_persist_load_layout(&eyes, &clock_place) == ESP_OK) {
-        s_eyes_on = eyes;
-        s_clock_place = clock_place;
-        ESP_LOGI(TAG, "restored layout eyes=%d clock=%d", eyes ? 1 : 0, clock_place);
-    }
+    /* Cinema mode: latest LTX Comfy clip, no eyes / no clock. */
+    s_eyes_on = false;
+    s_clock_place = 0;
+    desk_persist_save_layout(false, 0);
 
-    uint16_t *saved = NULL;
-    int sw = 0, sh = 0;
-    uint16_t *anim = NULL;
-    int aw = 0, ah = 0, an = 0, afps = 8;
-    if (desk_persist_load_anim(&anim, &aw, &ah, &an, &afps) == ESP_OK && anim) {
-        s_anim = anim;
-        s_anim_w = aw;
-        s_anim_h = ah;
-        s_anim_n = an;
-        s_anim_fps = afps > 0 ? afps : 8;
-        s_anim_frame_bytes = (size_t)aw * (size_t)ah * sizeof(uint16_t);
+    size_t anim_bytes = sizeof(MANGA_BOOT_PIX);
+    free(s_anim);
+    s_anim = (uint16_t *)malloc(anim_bytes);
+    if (s_anim) {
+        memcpy(s_anim, MANGA_BOOT_PIX, anim_bytes);
+        s_anim_w = MANGA_BOOT_W;
+        s_anim_h = MANGA_BOOT_H;
+        s_anim_n = MANGA_BOOT_FRAMES;
+        s_anim_fps = MANGA_BOOT_FPS;
+        s_anim_frame_bytes = (size_t)MANGA_BOOT_W * (size_t)MANGA_BOOT_H * sizeof(uint16_t);
         s_anim_i = 0;
         s_anim_ready = true;
         s_anim_loading = false;
         s_anim_next_us = esp_timer_get_time();
-        ESP_LOGI(TAG, "restored anim %dx%d x%d", aw, ah, an);
-    } else if (desk_persist_load_scenery(&saved, &sw, &sh) == ESP_OK && saved) {
-        s_scenery = saved;
-        s_scenery_w = sw;
-        s_scenery_h = sh;
-        s_scenery_bytes = (size_t)sw * (size_t)sh * sizeof(uint16_t);
-        s_scenery_ready = true;
-        s_scenery_loading = false;
-        ESP_LOGI(TAG, "restored scenery %dx%d", sw, sh);
-    } else {
-        /* Default demo until the user pushes their own layout. */
-        size_t bytes = sizeof(DEMO_SCENERY_PIX);
-        s_scenery = (uint16_t *)malloc(bytes);
-        if (s_scenery) {
-            memcpy(s_scenery, DEMO_SCENERY_PIX, bytes);
-            s_scenery_w = DEMO_SCENERY_W;
-            s_scenery_h = DEMO_SCENERY_H;
-            s_scenery_bytes = bytes;
-            s_scenery_ready = true;
-            s_scenery_loading = false;
-            ESP_LOGI(TAG, "demo scenery loaded %dx%d", DEMO_SCENERY_W, DEMO_SCENERY_H);
-        }
+        s_scenery_ready = false;
+        desk_persist_save_anim(s_anim, s_anim_w, s_anim_h, s_anim_n, s_anim_fps);
+        ESP_LOGI(TAG, "boot LTX kamehameha %dx%d x%d", s_anim_w, s_anim_h, s_anim_n);
     }
 
     xTaskCreate(render_task, "face", 10240, NULL, 6, NULL);

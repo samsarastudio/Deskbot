@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../ble/ble_controller.dart';
 import '../screens/layout_editor_screen.dart';
+import '../screens/message_anim_screen.dart';
 import '../sync/rssi_filter.dart';
 import '../theme/nova_theme.dart';
 import '../widgets/ambient_backdrop.dart';
@@ -152,6 +153,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       OutlinedButton(
                         onPressed: () {
                           Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const MessageAnimScreen()),
+                          );
+                        },
+                        child: const Text('LTX message'),
+                      ),
+                      OutlinedButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
                             MaterialPageRoute(builder: (_) => const LayoutEditorScreen()),
                           );
                         },
@@ -189,7 +198,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ],
                 const Spacer(),
                 OutlinedButton(
-                  onPressed: () => ref.read(bleControllerProvider.notifier).startScan(autoConnectRegistered: true),
+                  onPressed: () => ref.read(bleControllerProvider.notifier).reconnectNow(),
                   child: const Text('Refresh connection'),
                 ),
                 const SizedBox(height: 8),
