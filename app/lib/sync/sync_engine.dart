@@ -152,7 +152,45 @@ class SyncEngine {
     }
   }
 
+  Future<void> uploadAnimFrames(List<Uint8List> frames, {required int w, required int h, int fps = 8}) async {
+    if (!authed) {
+      throw StateError('Not linked — reconnect first');
+    }
+    if (frames.isEmpty) {
+      throw StateError('No frames');
+    }
+    final began = await sendDisplayWait({
+      'op': 'anim_begin',
+      'w': w,
+      'h': h,
+      'frames': frames.length,
+      'fps': fps,
+    });
+    if (!began) {
+      throw StateError('Deskbot rejected animation');
+    }
+    const chunk = 720;
+    for (var fi = 0; fi < frames.length; fi++) {
+      final pixels = frames[fi];
+      for (var off = 0; off < pixels.length; off += chunk) {
+        final end = math.min(off + chunk, pixels.length);
+        await sendDisplay({
+          'op': 'anim_chunk',
+          'frame': fi,
+          'off': off,
+          'data': base64Encode(pixels.sublist(off, end)),
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 24));
+      }
+    }
+    final ended = await sendDisplayWait({'op': 'anim_end'});
+    if (!ended) {
+      throw StateError('Animation commit failed');
+    }
+  }
+
   Future<void> clearScenery() => sendDisplay({'op': 'scenery_clear'});
+  Future<void> clearAnim() => sendDisplay({'op': 'anim_clear'});
 
   void _completeDisplay(bool ok) {
     final c = _displayAck;

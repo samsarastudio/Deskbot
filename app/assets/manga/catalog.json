@@ -1,0 +1,32 @@
+[
+  {
+    "id": "rooftop_rain",
+    "title": "Rooftop Rain",
+    "gif": "assets/manga/rooftop_rain.gif",
+    "preview": "assets/manga/rooftop_rain_preview.png"
+  },
+  {
+    "id": "sakura_path",
+    "title": "Sakura Path",
+    "gif": "assets/manga/sakura_path.gif",
+    "preview": "assets/manga/sakura_path_preview.png"
+  },
+  {
+    "id": "night_train",
+    "title": "Night Train",
+    "gif": "assets/manga/night_train.gif",
+    "preview": "assets/manga/night_train_preview.png"
+  },
+  {
+    "id": "lantern_forest",
+    "title": "Lantern Forest",
+    "gif": "assets/manga/lantern_forest.gif",
+    "preview": "assets/manga/lantern_forest_preview.png"
+  },
+  {
+    "id": "rainy_cafe",
+    "title": "Rainy Cafe",
+    "gif": "assets/manga/rainy_cafe.gif",
+    "preview": "assets/manga/rainy_cafe_preview.png"
+  }
+]

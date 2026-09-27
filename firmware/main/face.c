@@ -64,6 +64,19 @@ static bool s_eyes_on = true;
 /* 0=off 1=center 2=top 3=bottom 4=left 5=right */
 static int s_clock_place = 1;
 
+/* Looped manga/GIF frame strip (RGB565 frames packed). */
+#define ANIM_MAX_FRAMES 6
+static uint16_t *s_anim;
+static int s_anim_w;
+static int s_anim_h;
+static int s_anim_n;
+static int s_anim_i;
+static int s_anim_fps;
+static bool s_anim_ready;
+static bool s_anim_loading;
+static size_t s_anim_frame_bytes;
+static int64_t s_anim_next_us;
+
 #define HEART_MS 2400
 #define INTRO_MS 2200
 #define PART_N 48
@@ -658,6 +671,11 @@ static void draw_ble_status_scene(void)
 
 static void draw_scenery_bg(void)
 {
+    if (s_anim_ready && s_anim && s_anim_n > 0) {
+        const uint16_t *fr = s_anim + (size_t)s_anim_i * (size_t)s_anim_w * (size_t)s_anim_h;
+        lcd_blit_scaled(fr, s_anim_w, s_anim_h);
+        return;
+    }
     if (!s_scenery_ready || !s_scenery || s_scenery_w < 2 || s_scenery_h < 2) {
         draw_ambient_fluid();
         return;
@@ -929,6 +947,12 @@ static void render_task(void *arg)
             notify_ui = false;
             s_dirty = true;
         }
+        if (s_anim_ready && s_anim_n > 1 && now_us >= s_anim_next_us) {
+            s_anim_i = (s_anim_i + 1) % s_anim_n;
+            int fps = s_anim_fps > 0 ? s_anim_fps : 8;
+            s_anim_next_us = now_us + 1000000 / fps;
+            s_dirty = true;
+        }
         bool want_blink = s_eyes_on && !heart && !prompting && !ble_ui && !notify_ui && (now_us >= s_next_blink_us) && (s_state != FACE_SLEEP);
         /* Notify is static — only redraw when dirty, never in an animation loop. */
         bool full = s_dirty || (minute_key != last_minute) || heart || ble_ui;
@@ -977,6 +1001,9 @@ static void render_task(void *arg)
         } else if (prompting) {
             last_wake = xTaskGetTickCount();
             vTaskDelay(pdMS_TO_TICKS(150));
+        } else if (s_anim_ready) {
+            last_wake = xTaskGetTickCount();
+            vTaskDelay(pdMS_TO_TICKS(80));
         } else {
             last_wake = xTaskGetTickCount();
             vTaskDelay(pdMS_TO_TICKS(200));
@@ -1011,7 +1038,21 @@ esp_err_t face_init(void)
 
     uint16_t *saved = NULL;
     int sw = 0, sh = 0;
-    if (desk_persist_load_scenery(&saved, &sw, &sh) == ESP_OK && saved) {
+    uint16_t *anim = NULL;
+    int aw = 0, ah = 0, an = 0, afps = 8;
+    if (desk_persist_load_anim(&anim, &aw, &ah, &an, &afps) == ESP_OK && anim) {
+        s_anim = anim;
+        s_anim_w = aw;
+        s_anim_h = ah;
+        s_anim_n = an;
+        s_anim_fps = afps > 0 ? afps : 8;
+        s_anim_frame_bytes = (size_t)aw * (size_t)ah * sizeof(uint16_t);
+        s_anim_i = 0;
+        s_anim_ready = true;
+        s_anim_loading = false;
+        s_anim_next_us = esp_timer_get_time();
+        ESP_LOGI(TAG, "restored anim %dx%d x%d", aw, ah, an);
+    } else if (desk_persist_load_scenery(&saved, &sw, &sh) == ESP_OK && saved) {
         s_scenery = saved;
         s_scenery_w = sw;
         s_scenery_h = sh;
@@ -1381,4 +1422,87 @@ void face_scenery_clear(void)
     s_dirty = true;
     xSemaphoreGive(s_lock);
     desk_persist_clear_scenery();
+}
+
+bool face_anim_begin(int w, int h, int frames, int fps)
+{
+    if (w < 8 || h < 8 || w > 96 || h > 52 || frames < 1 || frames > ANIM_MAX_FRAMES) {
+        ESP_LOGW(TAG, "anim rejected %dx%d x%d", w, h, frames);
+        return false;
+    }
+    size_t frame_bytes = (size_t)w * (size_t)h * sizeof(uint16_t);
+    size_t total = frame_bytes * (size_t)frames;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    free(s_anim);
+    s_anim = (uint16_t *)malloc(total);
+    if (!s_anim) {
+        ESP_LOGE(TAG, "anim alloc %u failed free=%u", (unsigned)total, (unsigned)esp_get_free_heap_size());
+        s_anim_loading = false;
+        s_anim_ready = false;
+        xSemaphoreGive(s_lock);
+        return false;
+    }
+    memset(s_anim, 0, total);
+    s_anim_w = w;
+    s_anim_h = h;
+    s_anim_n = frames;
+    s_anim_fps = fps > 0 ? fps : 8;
+    s_anim_i = 0;
+    s_anim_frame_bytes = frame_bytes;
+    s_anim_loading = true;
+    s_anim_ready = false;
+    /* Prefer anim over still scenery while loading. */
+    s_scenery_ready = false;
+    xSemaphoreGive(s_lock);
+    ESP_LOGI(TAG, "anim begin %dx%d x%d @%dfps", w, h, frames, s_anim_fps);
+    return true;
+}
+
+bool face_anim_write_frame(int frame_index, size_t offset, const uint8_t *data, size_t len)
+{
+    if (!data || len == 0 || frame_index < 0) {
+        return false;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (!s_anim || !s_anim_loading || frame_index >= s_anim_n ||
+        offset + len > s_anim_frame_bytes) {
+        xSemaphoreGive(s_lock);
+        return false;
+    }
+    uint8_t *dst = ((uint8_t *)s_anim) + (size_t)frame_index * s_anim_frame_bytes + offset;
+    memcpy(dst, data, len);
+    xSemaphoreGive(s_lock);
+    return true;
+}
+
+void face_anim_commit(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (!s_anim || !s_anim_loading || s_anim_n < 1) {
+        xSemaphoreGive(s_lock);
+        return;
+    }
+    s_anim_loading = false;
+    s_anim_ready = true;
+    s_anim_i = 0;
+    s_anim_next_us = esp_timer_get_time();
+    s_dirty = true;
+    int w = s_anim_w, h = s_anim_h, n = s_anim_n, fps = s_anim_fps;
+    uint16_t *pix = s_anim;
+    xSemaphoreGive(s_lock);
+    desk_persist_save_anim(pix, w, h, n, fps);
+    ESP_LOGI(TAG, "anim ready %dx%d x%d", w, h, n);
+}
+
+void face_anim_clear(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    free(s_anim);
+    s_anim = NULL;
+    s_anim_w = s_anim_h = s_anim_n = 0;
+    s_anim_ready = false;
+    s_anim_loading = false;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+    desk_persist_clear_anim();
 }

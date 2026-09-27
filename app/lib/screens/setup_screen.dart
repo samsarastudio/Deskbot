@@ -25,7 +25,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(bleControllerProvider);
-    final showCode = s.phase == BleLinkPhase.registering || s.confirmCode != null;
+    final needCode = s.phase == BleLinkPhase.registering || s.phase == BleLinkPhase.found;
     final text = Theme.of(context).textTheme;
     return Scaffold(
       body: AmbientBackdrop(
@@ -46,24 +46,13 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                   style: text.headlineMedium,
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 16),
-                if (s.confirmCode != null)
-                  GlassPanel(
-                    child: Column(
-                      children: [
-                        Text('Code on desk', style: text.bodyMedium),
-                        const SizedBox(height: 8),
-                        Text(
-                          s.confirmCode!,
-                          style: text.displaySmall?.copyWith(
-                            color: NovaColors.gold,
-                            letterSpacing: 10,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (showCode) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Look at Deskbot for the 4-digit code, then type it here.',
+                  textAlign: TextAlign.center,
+                  style: text.bodyMedium,
+                ),
+                if (needCode) ...[
                   const SizedBox(height: 18),
                   TextField(
                     controller: _code,
@@ -72,9 +61,9 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                     textAlign: TextAlign.center,
                     enabled: s.status != 'Registering…' && s.status != 'Syncing…',
                     style: text.displaySmall?.copyWith(letterSpacing: 12),
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       counterText: '',
-                      hintText: s.confirmCode ?? '0000',
+                      hintText: '••••',
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -83,16 +72,13 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                     onPressed: (s.status == 'Registering…' || s.status == 'Syncing…')
                         ? null
                         : () {
-                            final code = _code.text.trim().isEmpty
-                                ? (s.confirmCode ?? '')
-                                : _code.text.trim();
-                            ref.read(bleControllerProvider.notifier).confirmSetup(code);
+                            ref.read(bleControllerProvider.notifier).confirmSetup(_code.text.trim());
                           },
                   ),
                 ],
                 const Spacer(),
                 Text(
-                  'Stay in the app — permissions and linking happen here.',
+                  'The code only appears on the desk — not in this app.',
                   textAlign: TextAlign.center,
                   style: text.bodyMedium,
                 ),

@@ -161,3 +161,88 @@ bool desk_persist_has_scenery(void)
     struct stat st;
     return stat("/spiffs/scenery.bin", &st) == 0 && st.st_size > (off_t)sizeof(scenery_hdr_t);
 }
+
+typedef struct __attribute__((packed)) {
+    uint16_t magic; /* 0xA31F */
+    uint16_t w;
+    uint16_t h;
+    uint16_t frames;
+    uint16_t fps;
+    uint16_t reserved;
+} anim_hdr_t;
+
+#define ANIM_MAGIC 0xA31F
+
+esp_err_t desk_persist_save_anim(const uint16_t *pix, int w, int h, int frames, int fps)
+{
+    if (!s_fs_ok || !pix || w < 1 || h < 1 || frames < 1) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    FILE *f = fopen("/spiffs/anim.bin", "wb");
+    if (!f) {
+        return ESP_FAIL;
+    }
+    anim_hdr_t hdr = {
+        .magic = ANIM_MAGIC,
+        .w = (uint16_t)w,
+        .h = (uint16_t)h,
+        .frames = (uint16_t)frames,
+        .fps = (uint16_t)(fps > 0 ? fps : 8),
+        .reserved = 0,
+    };
+    size_t bytes = (size_t)w * (size_t)h * sizeof(uint16_t) * (size_t)frames;
+    bool ok = fwrite(&hdr, sizeof(hdr), 1, f) == 1 && fwrite(pix, 1, bytes, f) == bytes;
+    fclose(f);
+    if (!ok) {
+        remove("/spiffs/anim.bin");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "saved anim %dx%d x%d", w, h, frames);
+    return ESP_OK;
+}
+
+esp_err_t desk_persist_load_anim(uint16_t **out_pix, int *out_w, int *out_h, int *out_frames, int *out_fps)
+{
+    if (!s_fs_ok || !out_pix) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    *out_pix = NULL;
+    FILE *f = fopen("/spiffs/anim.bin", "rb");
+    if (!f) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    anim_hdr_t hdr;
+    if (fread(&hdr, sizeof(hdr), 1, f) != 1 || hdr.magic != ANIM_MAGIC ||
+        hdr.w < 8 || hdr.h < 8 || hdr.w > 96 || hdr.h > 52 || hdr.frames < 1 || hdr.frames > 6) {
+        fclose(f);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    size_t bytes = (size_t)hdr.w * (size_t)hdr.h * sizeof(uint16_t) * (size_t)hdr.frames;
+    uint16_t *buf = (uint16_t *)malloc(bytes);
+    if (!buf) {
+        fclose(f);
+        return ESP_ERR_NO_MEM;
+    }
+    if (fread(buf, 1, bytes, f) != bytes) {
+        free(buf);
+        fclose(f);
+        return ESP_FAIL;
+    }
+    fclose(f);
+    *out_pix = buf;
+    if (out_w) *out_w = hdr.w;
+    if (out_h) *out_h = hdr.h;
+    if (out_frames) *out_frames = hdr.frames;
+    if (out_fps) *out_fps = hdr.fps;
+    ESP_LOGI(TAG, "loaded anim %dx%d x%d", hdr.w, hdr.h, hdr.frames);
+    return ESP_OK;
+}
+
+esp_err_t desk_persist_clear_anim(void)
+{
+    if (!s_fs_ok) {
+        return ESP_OK;
+    }
+    remove("/spiffs/anim.bin");
+    return ESP_OK;
+}

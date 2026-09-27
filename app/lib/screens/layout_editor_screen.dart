@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -6,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../ble/ble_controller.dart';
 import '../desk/layout_prefs.dart';
+import '../desk/manga_library.dart';
 import '../desk/scenery_encode.dart';
 import '../theme/nova_theme.dart';
 
@@ -103,6 +105,59 @@ class _LayoutEditorScreenState extends ConsumerState<LayoutEditorScreen> {
       _selectedId = _layers.isEmpty ? null : _layers.last.id;
     });
     _persistLocal();
+  }
+
+  Future<void> _pushManga(MangaLibraryItem item) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await _persistLocal();
+      final ble = ref.read(bleControllerProvider.notifier);
+      await ble.pushLayout(eyes: _eyes, clock: _clock);
+      final data = await rootBundle.load(item.assetGif);
+      await ble.uploadAnim(data.buffer.asUint8List());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${item.title} playing on Deskbot')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Manga push failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pickCustomGif() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+    // image_picker may not pick .gif on all platforms — also try file via bytes if image.
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await _persistLocal();
+      final ble = ref.read(bleControllerProvider.notifier);
+      await ble.pushLayout(eyes: _eyes, clock: _clock);
+      // If it's a still, upload as scenery; if multi-frame, anim path.
+      final decoded = img.decodeImage(bytes);
+      if (decoded != null && decoded.frames.length > 1) {
+        await ble.uploadAnim(bytes);
+      } else {
+        await ble.uploadScenery(bytes);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Custom media on Deskbot')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _pushToDesk() async {
@@ -235,6 +290,11 @@ class _LayoutEditorScreenState extends ConsumerState<LayoutEditorScreen> {
                         icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
                         label: const Text('Add image'),
                       ),
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _pickCustomGif,
+                        icon: const Icon(Icons.gif_box_outlined, size: 18),
+                        label: const Text('Custom GIF'),
+                      ),
                       if (selected != null)
                         OutlinedButton.icon(
                           onPressed: _busy ? null : _removeSelected,
@@ -242,6 +302,39 @@ class _LayoutEditorScreenState extends ConsumerState<LayoutEditorScreen> {
                           label: const Text('Remove'),
                         ),
                     ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Manga library', style: text.titleMedium),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 108,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: mangaLibrary.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 10),
+                      itemBuilder: (context, i) {
+                        final item = mangaLibrary[i];
+                        return GestureDetector(
+                          onTap: _busy ? null : () => _pushManga(item),
+                          child: SizedBox(
+                            width: 148,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Image.asset(item.assetPreview, fit: BoxFit.cover, width: 148),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(item.title, style: text.bodyMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                   if (selected != null) ...[
                     const SizedBox(height: 12),

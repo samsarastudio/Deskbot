@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../desk/desk_mirror.dart';
+import '../desk/manga_library.dart';
 import '../desk/scenery_encode.dart';
 import '../storage/deskbot_store.dart';
 import '../sync/rssi_filter.dart';
@@ -275,12 +276,13 @@ class BleController extends StateNotifier<BleUiState> {
       });
 
       if (existing == null) {
-        state = state.copyWith(phase: BleLinkPhase.registering, status: 'Linking your Deskbot…');
+        state = state.copyWith(
+          phase: BleLinkPhase.registering,
+          status: 'Enter the code shown on Deskbot',
+          clearCode: true,
+        );
+        // Ask desk to show pairing code on its LCD only — never mirror to phone UI.
         await _session?.write(utf8.encode(jsonEncode({'op': 'show_code'})), withoutResponse: false);
-        final sess = utf8.decode(await _session!.read());
-        final map = jsonDecode(sess) as Map<String, dynamic>;
-        final code = map['code']?.toString() ?? '0000';
-        state = state.copyWith(confirmCode: code);
       } else {
         state = state.copyWith(phase: BleLinkPhase.authenticating, status: 'Authenticating');
         await NovaKeepAlive.updateStatus('Authenticating…');
@@ -419,7 +421,7 @@ class BleController extends StateNotifier<BleUiState> {
         await NovaKeepAlive.updateStatus('Connected to NOVA');
         await _startMirror();
       } else if (type == 'UI_HINT') {
-        state = state.copyWith(confirmCode: hint);
+        // Pairing code is desk-only — do not surface it in the phone UI.
       } else if (type == 'NACK') {
         if (hint == 'Retrying auth…') {
           state = state.copyWith(phase: BleLinkPhase.authenticating, status: hint!, clearError: true);
@@ -442,9 +444,8 @@ class BleController extends StateNotifier<BleUiState> {
         if (state.phase != BleLinkPhase.connected && state.phase != BleLinkPhase.syncing) {
           state = state.copyWith(phase: BleLinkPhase.authenticating, status: 'Authenticating');
         }
-      } else if (hint != null && hint.length == 4) {
-        state = state.copyWith(confirmCode: hint);
       }
+      // Ignore length-4 hints that used to auto-fill the pairing code on phone.
     } catch (e) {
       debugPrint('notify parse $e');
     }
@@ -488,6 +489,15 @@ class BleController extends StateNotifier<BleUiState> {
       throw StateError('Connect to Deskbot first');
     }
     await sync.uploadSceneryRgb565(pixels, w: w, h: h);
+  }
+
+  Future<void> uploadAnim(Uint8List gifBytes) async {
+    final sync = _sync;
+    if (sync == null || !sync.authed) {
+      throw StateError('Connect to Deskbot first');
+    }
+    final frames = encodeGifToAnimFrames(gifBytes);
+    await sync.uploadAnimFrames(frames, w: kAnimW, h: kAnimH, fps: 8);
   }
 
   Future<void> uploadScenery(Uint8List imageBytes) async {

@@ -254,6 +254,43 @@ static void handle_display(cJSON *body)
                                  cJSON_IsString(tz) ? tz->valuestring : NULL);
         }
         send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "anim_begin")) {
+        const cJSON *w = cJSON_GetObjectItem(body, "w");
+        const cJSON *h = cJSON_GetObjectItem(body, "h");
+        const cJSON *frames = cJSON_GetObjectItem(body, "frames");
+        const cJSON *fps = cJSON_GetObjectItem(body, "fps");
+        send_ack(NULL, face_anim_begin(
+            cJSON_IsNumber(w) ? (int)w->valuedouble : 0,
+            cJSON_IsNumber(h) ? (int)h->valuedouble : 0,
+            cJSON_IsNumber(frames) ? (int)frames->valuedouble : 0,
+            cJSON_IsNumber(fps) ? (int)fps->valuedouble : 8));
+    } else if (!strcmp(op->valuestring, "anim_chunk")) {
+        const cJSON *frame = cJSON_GetObjectItem(body, "frame");
+        const cJSON *off = cJSON_GetObjectItem(body, "off");
+        const cJSON *data = cJSON_GetObjectItem(body, "data");
+        if (!cJSON_IsNumber(frame) || !cJSON_IsNumber(off) || !cJSON_IsString(data)) {
+            send_ack(NULL, false);
+            return;
+        }
+        size_t b64_len = strlen(data->valuestring);
+        size_t olen = (b64_len / 4) * 3 + 4;
+        uint8_t *buf = malloc(olen);
+        if (!buf) {
+            send_ack(NULL, false);
+            return;
+        }
+        size_t written = 0;
+        int rc = mbedtls_base64_decode(buf, olen, &written,
+                                       (const unsigned char *)data->valuestring, b64_len);
+        bool ok = (rc == 0) && face_anim_write_frame((int)frame->valuedouble, (size_t)off->valuedouble, buf, written);
+        free(buf);
+        send_ack(NULL, ok);
+    } else if (!strcmp(op->valuestring, "anim_end")) {
+        face_anim_commit();
+        send_ack(NULL, true);
+    } else if (!strcmp(op->valuestring, "anim_clear")) {
+        face_anim_clear();
+        send_ack(NULL, true);
     } else if (!strcmp(op->valuestring, "scenery")) {
         /* One-shot tiny pixel-art payload (preferred). */
         const cJSON *w = cJSON_GetObjectItem(body, "w");
@@ -451,7 +488,9 @@ void sync_proto_on_message(const uint8_t *data, size_t len)
         if (ownership_get()->registered) {
             sync_proto_send_challenge();
         } else {
-            face_set_ble_status("CODE", "focused", ownership_confirm_code());
+            /* Stay idle; code appears only when app requests show_code. */
+            face_set_ble_status(NULL, NULL, NULL);
+            face_set_state(FACE_IDLE);
         }
     } else if (!strcmp(type->valuestring, "AUTH")) {
         handle_auth(body);
@@ -516,7 +555,8 @@ void sync_proto_on_session_control(const char *json)
         ownership_clear();
         sync_proto_reset_session();
         session_sm_on_factory_reset();
-        face_set_ble_status("Open app", "curious", ownership_confirm_code());
+        face_set_ble_status(NULL, NULL, NULL);
+        face_set_state(FACE_IDLE);
         send_ack(NULL, true);
     }
     cJSON_Delete(root);

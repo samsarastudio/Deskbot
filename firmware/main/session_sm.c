@@ -11,7 +11,10 @@ static void apply_ui(session_state_t state)
 {
     switch (state) {
     case SM_UNREGISTERED:
-        face_set_ble_status("Open app", "curious", ownership_confirm_code());
+        /* Idle until pairing starts — no code overlay. */
+        face_set_ble_status(NULL, NULL, NULL);
+        face_set_ble_pip(false);
+        face_set_state(FACE_IDLE);
         break;
     case SM_REGISTERED_OFFLINE:
         face_set_ble_status(NULL, NULL, NULL);
