@@ -18,6 +18,7 @@
 #include "led_strip.h"
 
 #include "app_config.h"
+#include "demo_scenery.h"
 #include "lcd.h"
 #include "pins.h"
 
@@ -605,14 +606,17 @@ static void draw_ble_status_scene(void)
     float breath = 0.5f + 0.5f * sinf(t * 1.35f);
     float sway = sinf(t * 0.9f) * 3.0f;
 
-    /* Ambient blobs */
-    int bx = (int)(40 + sway * 2.0f);
-    int by = (int)(30 + breath * 6.0f);
-    lcd_fill_circle(bx, by, (int)(28 + breath * 4.0f), RGB565(18, 42, 58));
-    lcd_fill_circle(DESKBOT_LCD_WIDTH - 36, DESKBOT_LCD_HEIGHT - 40,
-                    (int)(34 + (1.0f - breath) * 5.0f), RGB565(28, 36, 22));
-    lcd_fill_circle(DESKBOT_LCD_WIDTH / 2, DESKBOT_LCD_HEIGHT - 18,
-                    (int)(22 + breath * 3.0f), RGB565(40, 24, 36));
+    if (s_scenery_ready && s_scenery) {
+        lcd_blit_scaled(s_scenery, s_scenery_w, s_scenery_h);
+    } else {
+        int bx = (int)(40 + sway * 2.0f);
+        int by = (int)(30 + breath * 6.0f);
+        lcd_fill_circle(bx, by, (int)(28 + breath * 4.0f), RGB565(18, 42, 58));
+        lcd_fill_circle(DESKBOT_LCD_WIDTH - 36, DESKBOT_LCD_HEIGHT - 40,
+                        (int)(34 + (1.0f - breath) * 5.0f), RGB565(28, 36, 22));
+        lcd_fill_circle(DESKBOT_LCD_WIDTH / 2, DESKBOT_LCD_HEIGHT - 18,
+                        (int)(22 + breath * 3.0f), RGB565(40, 24, 36));
+    }
 
     /* Brand */
     draw_centered_fast(6, 1, COL_ACCENT, "NOVA");
@@ -966,6 +970,20 @@ esp_err_t face_init(void)
     tzset();
     s_state = FACE_OFFLINE;
     rgb(12, 4, 0);
+
+    /* Built-in dusk hills pixel-art sample (~1KB). */
+    size_t bytes = sizeof(DEMO_SCENERY_PIX);
+    s_scenery = (uint16_t *)malloc(bytes);
+    if (s_scenery) {
+        memcpy(s_scenery, DEMO_SCENERY_PIX, bytes);
+        s_scenery_w = DEMO_SCENERY_W;
+        s_scenery_h = DEMO_SCENERY_H;
+        s_scenery_bytes = bytes;
+        s_scenery_ready = true;
+        s_scenery_loading = false;
+        ESP_LOGI(TAG, "demo scenery loaded %dx%d", DEMO_SCENERY_W, DEMO_SCENERY_H);
+    }
+
     xTaskCreate(render_task, "face", 10240, NULL, 6, NULL);
     ESP_LOGI(TAG, "LCD face + RGB ready");
     return ESP_OK;
@@ -1207,8 +1225,8 @@ void face_clear_calendar(void)
 
 bool face_scenery_begin(int w, int h)
 {
-    /* Pixel-art sized only — ~1KB so one BLE frame is enough. */
-    if (w < 8 || h < 8 || w > 40 || h > 24) {
+    /* Half-LCD photo max (160×86 ≈ 27KB). Single buffer only. */
+    if (w < 8 || h < 8 || w > 160 || h > 86) {
         ESP_LOGW(TAG, "scenery size rejected %dx%d", w, h);
         return false;
     }

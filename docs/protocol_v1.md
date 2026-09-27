@@ -107,13 +107,13 @@ Authenticated session only. Ops:
 { "op": "prompt", "speaker": "nova", "text": "Hello from phone" }
 { "op": "time", "unix": 1710000000, "tz": "EST5EDT,M3.2.0,M11.1.0" }
 { "op": "scenery", "w": 32, "h": 18, "fmt": "rgb565", "data": "<base64>" }
-{ "op": "scenery_begin", "w": 32, "h": 18, "fmt": "rgb565" }
+{ "op": "scenery_begin", "w": 160, "h": 86, "fmt": "rgb565" }
 { "op": "scenery_chunk", "off": 0, "data": "<base64 rgb565 bytes>" }
 { "op": "scenery_end" }
 { "op": "scenery_clear" }
 ```
 
-Preferred: one-shot `scenery` with 32×18 pixel-art RGB565 (~1.1KB). Chunked begin/chunk/end remains for compatibility. Max size 40×24.
+Preferred: chunked `scenery_begin` / `scenery_chunk` / `scenery_end` at **160×86** (half LCD, ~27KB RGB565). Phone encodes photos with cover-crop + average downsample + Floyd–Steinberg dither so gradients still read as a photo. Desk upscales with a fast exact 2× blit. One-shot `scenery` remains for tiny payloads only.
 
 ### HELLO body
 

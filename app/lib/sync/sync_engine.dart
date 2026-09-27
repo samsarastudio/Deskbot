@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -119,16 +120,27 @@ class SyncEngine {
     if (!authed) {
       throw StateError('Not linked — reconnect first');
     }
-    // One-shot pixel-art payload (~1KB) — no multi-chunk wait that can hang.
-    final ok = await sendDisplayWait({
-      'op': 'scenery',
-      'w': w,
-      'h': h,
-      'fmt': 'rgb565',
-      'data': base64Encode(pixels),
-    });
-    if (!ok) {
-      throw StateError('Deskbot rejected scenery');
+    final began = await sendDisplayWait({'op': 'scenery_begin', 'w': w, 'h': h, 'fmt': 'rgb565'});
+    if (!began) {
+      throw StateError('Deskbot rejected scenery (need more RAM?)');
+    }
+
+    // Stream chunks fast — ACK only begin + end (avoids multi-minute hangs).
+    const chunk = 720;
+    for (var off = 0; off < pixels.length; off += chunk) {
+      final end = math.min(off + chunk, pixels.length);
+      final slice = pixels.sublist(off, end);
+      await sendDisplay({
+        'op': 'scenery_chunk',
+        'off': off,
+        'data': base64Encode(slice),
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 28));
+    }
+
+    final ended = await sendDisplayWait({'op': 'scenery_end'});
+    if (!ended) {
+      throw StateError('Scenery commit failed');
     }
   }
 

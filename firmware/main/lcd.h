@@ -23,6 +23,7 @@ void lcd_neon_ellipse_ring(float cx, float cy, float rx, float ry, float stroke,
 void lcd_neon_heart(float cx, float cy, float size, float glow, uint16_t core, uint16_t halo);
 void lcd_blit_heart(int cx, int cy, int w, int h, uint16_t core, uint16_t halo);
 void lcd_blit_scaled(const uint16_t *src, int sw, int sh);
+void lcd_blit_2x(const uint16_t *src, int sw, int sh);
 void lcd_spark(int cx, int cy, int r, uint16_t color);
 void lcd_heart_warmup(void);
 void lcd_flush(void);

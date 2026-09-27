@@ -483,6 +483,11 @@ void lcd_blit_scaled(const uint16_t *src, int sw, int sh)
     if (!s_fb || !src || sw < 1 || sh < 1) {
         return;
     }
+    /* Exact 2× photo path — crisp, cheap. */
+    if (sw * 2 == DESKBOT_LCD_WIDTH && sh * 2 == DESKBOT_LCD_HEIGHT) {
+        lcd_blit_2x(src, sw, sh);
+        return;
+    }
     for (int y = 0; y < DESKBOT_LCD_HEIGHT; y++) {
         int sy = y * sh / DESKBOT_LCD_HEIGHT;
         if (sy >= sh) {
@@ -496,6 +501,26 @@ void lcd_blit_scaled(const uint16_t *src, int sw, int sh)
                 sx = sw - 1;
             }
             drow[x] = srow[sx];
+        }
+    }
+}
+
+void lcd_blit_2x(const uint16_t *src, int sw, int sh)
+{
+    if (!s_fb || !src || sw * 2 != DESKBOT_LCD_WIDTH || sh * 2 != DESKBOT_LCD_HEIGHT) {
+        return;
+    }
+    for (int y = 0; y < sh; y++) {
+        const uint16_t *srow = src + y * sw;
+        uint16_t *d0 = s_fb + (y * 2) * DESKBOT_LCD_WIDTH;
+        uint16_t *d1 = d0 + DESKBOT_LCD_WIDTH;
+        for (int x = 0; x < sw; x++) {
+            uint16_t c = srow[x];
+            int dx = x * 2;
+            d0[dx] = c;
+            d0[dx + 1] = c;
+            d1[dx] = c;
+            d1[dx + 1] = c;
         }
     }
 }
