@@ -13,7 +13,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from .db import SessionLocal, init_db
+from . import db as db_mod
+from .db import init_db
 from .routes_admin import ensure_admin_user, router as admin_router
 from .routes_auth import router as auth_router
 from .routes_ltx import router as ltx_router
@@ -39,8 +40,8 @@ def _load_dotenv() -> None:
 async def lifespan(_app: FastAPI):
     _load_dotenv()
     init_db()
-    assert SessionLocal is not None
-    db = SessionLocal()
+    assert db_mod.SessionLocal is not None
+    db = db_mod.SessionLocal()
     try:
         ensure_admin_user(db)
     finally:
