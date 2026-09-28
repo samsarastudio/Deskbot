@@ -8,6 +8,7 @@ import '../ble/ble_controller.dart';
 import '../cloud/auth_controller.dart';
 import '../cloud/deskbot_cloud_api.dart';
 import '../comfy/ltx_prompt_builder.dart';
+import '../desk/manga_library.dart';
 import '../theme/nova_theme.dart';
 
 /// Full LTX generator: create (3/day) + gallery of past generations.
@@ -133,14 +134,14 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
     return _sel.copyWith(styleNote: _styleNote.text).build();
   }
 
-  Future<void> _pushFramesToDesk(List<Uint8List> frames) async {
+  Future<void> _pushFramesToDesk(List<Uint8List> frames, {int w = kAnimW, int h = kAnimH}) async {
     final ble = ref.read(bleControllerProvider.notifier);
     final phase = ref.read(bleControllerProvider).phase;
     if (phase != BleLinkPhase.connected) {
       throw StateError('Connect to Deskbot first');
     }
     await ble.pushLayout(eyes: false, clock: 'off');
-    await ble.uploadAnimFrames(frames, fps: 8);
+    await ble.uploadAnimFrames(frames, fps: kAnimFps, w: w, h: h);
   }
 
   Future<void> _generateAndPush() async {
@@ -185,7 +186,7 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
       if (frames.isEmpty) throw CloudApiException('Job succeeded but no frames returned');
 
       setState(() => _stage = 'Sending to Deskbot…');
-      await _pushFramesToDesk(frames);
+      await _pushFramesToDesk(frames, w: job.frameW, h: job.frameH);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -216,7 +217,7 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
       final frames = full.decodedFrames();
       if (frames.isEmpty) throw CloudApiException('No frames for this clip');
       setState(() => _stage = 'Sending to Deskbot…');
-      await _pushFramesToDesk(frames);
+      await _pushFramesToDesk(frames, w: full.frameW, h: full.frameH);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${job.title.isEmpty ? "Clip" : job.title} on Deskbot')),

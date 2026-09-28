@@ -19,9 +19,9 @@ NODE_FPS = "405:361"
 NODE_ENHANCE = "405:383"
 NODE_SAVE_VIDEO = "75"
 
-ANIM_W = 96
-ANIM_H = 52
-ANIM_MAX_FRAMES = 6
+ANIM_W = 128
+ANIM_H = 68
+ANIM_MAX_FRAMES = 12
 
 
 def _rgb565(r: int, g: int, b: int) -> int:

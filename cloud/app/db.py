@@ -44,8 +44,8 @@ class LtxJob(Base):
     video_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     preview_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     frames_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    frame_w: Mapped[int] = mapped_column(Integer, default=96)
-    frame_h: Mapped[int] = mapped_column(Integer, default=52)
+    frame_w: Mapped[int] = mapped_column(Integer, default=128)
+    frame_h: Mapped[int] = mapped_column(Integer, default=68)
     frame_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

@@ -617,10 +617,15 @@ class BleController extends StateNotifier<BleUiState> {
       throw StateError('Connect to Deskbot first');
     }
     final frames = encodeGifToAnimFrames(gifBytes);
-    await sync.uploadAnimFrames(frames, w: kAnimW, h: kAnimH, fps: 8);
+    await sync.uploadAnimFrames(frames, w: kAnimW, h: kAnimH, fps: kAnimFps);
   }
 
-  Future<void> uploadAnimFrames(List<Uint8List> frames, {int fps = 8}) async {
+  Future<void> uploadAnimFrames(
+    List<Uint8List> frames, {
+    int fps = kAnimFps,
+    int w = kAnimW,
+    int h = kAnimH,
+  }) async {
     final sync = _sync;
     if (sync == null || !sync.authed) {
       throw StateError('Connect to Deskbot first');
@@ -628,7 +633,7 @@ class BleController extends StateNotifier<BleUiState> {
     if (frames.isEmpty) {
       throw StateError('No animation frames');
     }
-    await sync.uploadAnimFrames(frames, w: kAnimW, h: kAnimH, fps: fps);
+    await sync.uploadAnimFrames(frames, w: w, h: h, fps: fps);
   }
 
   Future<void> uploadScenery(Uint8List imageBytes) async {

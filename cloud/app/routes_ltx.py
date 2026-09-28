@@ -34,8 +34,8 @@ class JobOut(BaseModel):
     title: str = ""
     duration_sec: int
     error: str | None = None
-    frame_w: int = 96
-    frame_h: int = 52
+    frame_w: int = 128
+    frame_h: int = 68
     frame_count: int = 0
     frames_b64: list[str] | None = None
     video_url: str | None = None

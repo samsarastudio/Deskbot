@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HDR = ROOT / "firmware" / "main" / "manga_boot.h"
 GIF = ROOT / "app" / "assets" / "manga" / "ltx_kamehameha.gif"
 OUT = ROOT / "tools" / "comfy" / "out"
-W, H, FPS = 96, 52, 8
+W, H, FPS = 128, 68, 10
 
 
 def req(method: str, path: str, data: dict | None = None, token: str | None = None):

@@ -213,7 +213,7 @@ esp_err_t desk_persist_load_anim(uint16_t **out_pix, int *out_w, int *out_h, int
     }
     anim_hdr_t hdr;
     if (fread(&hdr, sizeof(hdr), 1, f) != 1 || hdr.magic != ANIM_MAGIC ||
-        hdr.w < 8 || hdr.h < 8 || hdr.w > 96 || hdr.h > 52 || hdr.frames < 1 || hdr.frames > 6) {
+        hdr.w < 8 || hdr.h < 8 || hdr.w > 160 || hdr.h > 86 || hdr.frames < 1 || hdr.frames > 12) {
         fclose(f);
         return ESP_ERR_INVALID_SIZE;
     }

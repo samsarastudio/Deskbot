@@ -4,9 +4,10 @@ import 'package:image/image.dart' as img;
 
 import 'scenery_encode.dart';
 
-const int kAnimW = 96;
-const int kAnimH = 52;
-const int kAnimMaxFrames = 6;
+const int kAnimW = 128;
+const int kAnimH = 68;
+const int kAnimMaxFrames = 12;
+const int kAnimFps = 10;
 
 class MangaLibraryItem {
   const MangaLibraryItem({

@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_system.h"
@@ -65,8 +66,12 @@ static bool s_eyes_on = true;
 /* 0=off 1=center 2=top 3=bottom 4=left 5=right */
 static int s_clock_place = 1;
 
-/* Looped manga/GIF frame strip (RGB565 frames packed). */
-#define ANIM_MAX_FRAMES 6
+/* Looped manga/GIF frame strip (RGB565 frames packed).
+ * Cap matches scenery half-LCD (160×86) so playback can use exact 2× blit.
+ * Default encodes are 128×68 × 12 (~205KB) to leave headroom for BLE + FB. */
+#define ANIM_MAX_W 160
+#define ANIM_MAX_H 86
+#define ANIM_MAX_FRAMES 12
 static uint16_t *s_anim;
 static int s_anim_w;
 static int s_anim_h;
@@ -1406,17 +1411,26 @@ void face_scenery_clear(void)
 
 bool face_anim_begin(int w, int h, int frames, int fps)
 {
-    if (w < 8 || h < 8 || w > 96 || h > 52 || frames < 1 || frames > ANIM_MAX_FRAMES) {
+    if (w < 8 || h < 8 || w > ANIM_MAX_W || h > ANIM_MAX_H || frames < 1 || frames > ANIM_MAX_FRAMES) {
         ESP_LOGW(TAG, "anim rejected %dx%d x%d", w, h, frames);
         return false;
     }
     size_t frame_bytes = (size_t)w * (size_t)h * sizeof(uint16_t);
     size_t total = frame_bytes * (size_t)frames;
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    /* Drop still scenery so the larger frame strip can allocate. */
+    free(s_scenery);
+    s_scenery = NULL;
+    s_scenery_w = s_scenery_h = 0;
+    s_scenery_bytes = 0;
+    s_scenery_ready = false;
+    s_scenery_loading = false;
     free(s_anim);
     s_anim = (uint16_t *)malloc(total);
     if (!s_anim) {
-        ESP_LOGE(TAG, "anim alloc %u failed free=%u", (unsigned)total, (unsigned)esp_get_free_heap_size());
+        ESP_LOGE(TAG, "anim alloc %u failed free=%u largest=%u", (unsigned)total,
+                 (unsigned)esp_get_free_heap_size(),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         s_anim_loading = false;
         s_anim_ready = false;
         xSemaphoreGive(s_lock);
@@ -1426,15 +1440,14 @@ bool face_anim_begin(int w, int h, int frames, int fps)
     s_anim_w = w;
     s_anim_h = h;
     s_anim_n = frames;
-    s_anim_fps = fps > 0 ? fps : 8;
+    s_anim_fps = fps > 0 ? fps : 10;
     s_anim_i = 0;
     s_anim_frame_bytes = frame_bytes;
     s_anim_loading = true;
     s_anim_ready = false;
-    /* Prefer anim over still scenery while loading. */
-    s_scenery_ready = false;
     xSemaphoreGive(s_lock);
-    ESP_LOGI(TAG, "anim begin %dx%d x%d @%dfps", w, h, frames, s_anim_fps);
+    ESP_LOGI(TAG, "anim begin %dx%d x%d @%dfps (%u bytes, free=%u)", w, h, frames, s_anim_fps,
+             (unsigned)total, (unsigned)esp_get_free_heap_size());
     return true;
 }
 

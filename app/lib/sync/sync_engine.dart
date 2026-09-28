@@ -152,7 +152,7 @@ class SyncEngine {
     }
   }
 
-  Future<void> uploadAnimFrames(List<Uint8List> frames, {required int w, required int h, int fps = 8}) async {
+  Future<void> uploadAnimFrames(List<Uint8List> frames, {required int w, required int h, int fps = 10}) async {
     if (!authed) {
       throw StateError('Not linked — reconnect first');
     }
