@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deskbot Admin</title>
+  <style>
+    :root {
+      --bg: #0e141c;
+      --panel: #172033;
+      --line: #2a3a52;
+      --text: #e8eef7;
+      --muted: #8fa3bd;
+      --accent: #5ec8ff;
+      --good: #3dd68c;
+      --bad: #ff6b7a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 system-ui, Segoe UI, sans-serif;
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2a44, var(--bg));
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 28px 18px 48px; }
+    h1 { font-size: 1.55rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); margin-bottom: 22px; }
+    .card {
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    label { display: block; color: var(--muted); font-size: 0.85rem; margin-bottom: 6px; }
+    input, button {
+      font: inherit;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #0f1724;
+      color: var(--text);
+      padding: 10px 12px;
+    }
+    input { width: 100%; margin-bottom: 12px; }
+    button {
+      cursor: pointer;
+      background: linear-gradient(180deg, #2a6f94, #1d5472);
+      border-color: #3a88b0;
+    }
+    button.ghost { background: transparent; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+    .row > * { flex: 1; min-width: 140px; }
+    .err { color: var(--bad); margin-top: 8px; }
+    .ok { color: var(--good); margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      border: 1px solid var(--line);
+      color: var(--muted);
+    }
+    .pill.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 50%, var(--line)); }
+    .pill.off { color: var(--bad); }
+    .limit-input { width: 72px; margin: 0; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+    #loginView, #dashView { display: none; }
+    #loginView.show, #dashView.show { display: block; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="loginView">
+      <h1>Deskbot Admin</h1>
+      <p class="sub">Sign in to manage user generation limits.</p>
+      <div class="card">
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="username" />
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" />
+        <button id="loginBtn" type="button">Sign in</button>
+        <div id="loginMsg" class="err"></div>
+      </div>
+    </div>
+
+    <div id="dashView">
+      <div class="topbar">
+        <div>
+          <h1>Users & quotas</h1>
+          <p class="sub" style="margin:0">Per-user daily LTX generation limit. Empty = global default.</p>
+        </div>
+        <div>
+          <span id="who" class="muted"></span>
+          <button class="ghost" id="logoutBtn" type="button">Sign out</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="row" style="margin-bottom:12px">
+          <div>
+            <label>Global default (env)</label>
+            <div id="globalLimit" class="muted">—</div>
+          </div>
+          <div>
+            <label>Search</label>
+            <input id="search" placeholder="email or name" />
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <button id="refreshBtn" type="button">Refresh</button>
+          </div>
+        </div>
+        <div id="dashMsg"></div>
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Today</th>
+              <th>Daily limit</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script>
+    const TOKEN_KEY = "deskbot_admin_token";
+    const api = (path, opts = {}) => {
+      const headers = Object.assign({ "Content-Type": "application/json", "Accept": "application/json" }, opts.headers || {});
+      const token = localStorage.getItem(TOKEN_KEY);
+      if (token) headers.Authorization = "Bearer " + token;
+      return fetch(path, Object.assign({}, opts, { headers })).then(async (r) => {
+        const text = await r.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch (_) { data = { detail: text }; }
+        if (!r.ok) {
+          const detail = (data && (data.detail || data.message)) || r.statusText;
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+        return data;
+      });
+    };
+
+    const loginView = document.getElementById("loginView");
+    const dashView = document.getElementById("dashView");
+    let users = [];
+    let globalLimit = 3;
+
+    function showLogin(msg) {
+      loginView.classList.add("show");
+      dashView.classList.remove("show");
+      if (msg) document.getElementById("loginMsg").textContent = msg;
+    }
+    function showDash() {
+      loginView.classList.remove("show");
+      dashView.classList.add("show");
+    }
+
+    async function login() {
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+      document.getElementById("loginMsg").textContent = "";
+      try {
+        const data = await api("/v1/admin/login", {
+          method: "POST",
+          body: JSON.stringify({ email, password }),
+        });
+        localStorage.setItem(TOKEN_KEY, data.access_token);
+        document.getElementById("who").textContent = data.email;
+        showDash();
+        await loadUsers();
+      } catch (e) {
+        document.getElementById("loginMsg").textContent = e.message || String(e);
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem(TOKEN_KEY);
+      showLogin("");
+    }
+
+    function render() {
+      const q = (document.getElementById("search").value || "").toLowerCase().trim();
+      const tbody = document.getElementById("tbody");
+      tbody.innerHTML = "";
+      document.getElementById("globalLimit").textContent = globalLimit + " / day";
+      const rows = users.filter((u) => {
+        if (!q) return true;
+        return (u.email + " " + (u.display_name || "")).toLowerCase().includes(q);
+      });
+      for (const u of rows) {
+        const tr = document.createElement("tr");
+        const limitVal = u.daily_ltx_limit == null ? "" : String(u.daily_ltx_limit);
+        tr.innerHTML = `
+          <td>
+            <div><strong>${escapeHtml(u.display_name || "—")}</strong></div>
+            <div class="muted">${escapeHtml(u.email)}</div>
+            ${u.is_admin ? '<span class="pill on">admin</span>' : ""}
+          </td>
+          <td>${u.used_today} / ${u.effective_limit}</td>
+          <td><input class="limit-input" type="number" min="0" max="999" data-id="${u.id}" value="${limitVal}" placeholder="${globalLimit}" /></td>
+          <td><span class="pill ${u.is_active ? "on" : "off"}">${u.is_active ? "active" : "disabled"}</span></td>
+          <td><button type="button" data-save="${u.id}">Save</button></td>
+        `;
+        tbody.appendChild(tr);
+      }
+      tbody.querySelectorAll("button[data-save]").forEach((btn) => {
+        btn.addEventListener("click", () => saveUser(Number(btn.getAttribute("data-save"))));
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    }
+
+    async function loadUsers() {
+      document.getElementById("dashMsg").textContent = "";
+      document.getElementById("dashMsg").className = "";
+      try {
+        const data = await api("/v1/admin/users");
+        users = data.users || [];
+        globalLimit = data.global_daily_limit ?? 3;
+        render();
+      } catch (e) {
+        if (String(e.message).toLowerCase().includes("401") || String(e.message).includes("Not authenticated") || String(e.message).includes("admin")) {
+          logout();
+          showLogin(e.message);
+          return;
+        }
+        document.getElementById("dashMsg").className = "err";
+        document.getElementById("dashMsg").textContent = e.message || String(e);
+      }
+    }
+
+    async function saveUser(id) {
+      const input = document.querySelector(`input.limit-input[data-id="${id}"]`);
+      const raw = (input.value || "").trim();
+      const body = { daily_ltx_limit: raw === "" ? null : Number(raw) };
+      if (body.daily_ltx_limit != null && (Number.isNaN(body.daily_ltx_limit) || body.daily_ltx_limit < 0)) {
+        document.getElementById("dashMsg").className = "err";
+        document.getElementById("dashMsg").textContent = "Limit must be empty or a non-negative number";
+        return;
+      }
+      try {
+        await api("/v1/admin/users/" + id, { method: "PATCH", body: JSON.stringify(body) });
+        document.getElementById("dashMsg").className = "ok";
+        document.getElementById("dashMsg").textContent = "Saved user #" + id;
+        await loadUsers();
+      } catch (e) {
+        document.getElementById("dashMsg").className = "err";
+        document.getElementById("dashMsg").textContent = e.message || String(e);
+      }
+    }
+
+    document.getElementById("loginBtn").addEventListener("click", login);
+    document.getElementById("logoutBtn").addEventListener("click", logout);
+    document.getElementById("refreshBtn").addEventListener("click", loadUsers);
+    document.getElementById("search").addEventListener("input", render);
+    document.getElementById("password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") login();
+    });
+
+    (async () => {
+      if (!localStorage.getItem(TOKEN_KEY)) {
+        showLogin("");
+        return;
+      }
+      showDash();
+      try {
+        const me = await api("/v1/admin/me");
+        document.getElementById("who").textContent = me.email;
+        await loadUsers();
+      } catch (_) {
+        logout();
+      }
+    })();
+  </script>
+</body>
+</html>

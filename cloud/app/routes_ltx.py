@@ -20,6 +20,12 @@ from .security import get_current_user
 router = APIRouter(tags=["ltx"])
 
 
+def _effective_daily_limit(user: User) -> int:
+    if getattr(user, "daily_ltx_limit", None) is not None:
+        return int(user.daily_ltx_limit)
+    return DAILY_LTX_LIMIT
+
+
 class CreateJobBody(BaseModel):
     prompt: str = Field(min_length=8, max_length=4000)
     title: str = Field(default="", max_length=160)
@@ -64,14 +70,14 @@ def _day_start_utc() -> datetime:
     return datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
 
 
-def _quota_for_user(db: Session, user_id: int) -> QuotaOut:
+def _quota_for_user(db: Session, user: User) -> QuotaOut:
     start = _day_start_utc()
     used = db.scalar(
         select(func.count())
         .select_from(LtxJob)
-        .where(LtxJob.user_id == user_id, LtxJob.created_at >= start)
+        .where(LtxJob.user_id == user.id, LtxJob.created_at >= start)
     ) or 0
-    limit = DAILY_LTX_LIMIT
+    limit = _effective_daily_limit(user)
     remaining = max(0, limit - int(used))
     from datetime import timedelta
 
@@ -146,7 +152,7 @@ def _run_job_worker(job_id: str) -> None:
 
 @router.get("/ltx/quota", response_model=QuotaOut)
 def get_quota(user: User = Depends(get_current_user), db: Session = Depends(get_session)):
-    return _quota_for_user(db, user.id)
+    return _quota_for_user(db, user)
 
 
 @router.post("/ltx/jobs", response_model=JobOut)
@@ -156,7 +162,7 @@ def create_job(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_session),
 ):
-    quota = _quota_for_user(db, user.id)
+    quota = _quota_for_user(db, user)
     if quota.remaining <= 0:
         raise HTTPException(
             status_code=429,

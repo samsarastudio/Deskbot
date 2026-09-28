@@ -55,6 +55,11 @@ const ltxCharacters = <LtxChoice>[
     label: 'Cat mage',
     phrase: 'tiny cat mage in a cloak, big eyes, magical spark accents',
   ),
+  LtxChoice(
+    id: 'custom',
+    label: 'Custom',
+    phrase: '',
+  ),
 ];
 
 const ltxMotions = <LtxChoice>[
@@ -98,6 +103,11 @@ const ltxMotions = <LtxChoice>[
     label: 'Shake no',
     phrase: 'shakes head no with a small warning gesture',
   ),
+  LtxChoice(
+    id: 'custom',
+    label: 'Custom',
+    phrase: '',
+  ),
 ];
 
 const ltxEmotions = <LtxChoice>[
@@ -136,6 +146,11 @@ const ltxEmotions = <LtxChoice>[
     label: 'Mischief',
     phrase: 'mischievous grin, playful spark in the eyes',
   ),
+  LtxChoice(
+    id: 'custom',
+    label: 'Custom',
+    phrase: '',
+  ),
 ];
 
 const ltxPowers = <LtxPowerLevel>[
@@ -157,6 +172,12 @@ const ltxPowers = <LtxPowerLevel>[
     intensity: 'high-energy exaggerated motion for a tiny screen',
     fx: 'intense glowing aura, bold energy trails, dramatic sparks',
   ),
+  LtxPowerLevel(
+    id: 'custom',
+    label: 'Custom',
+    intensity: '',
+    fx: '',
+  ),
 ];
 
 class LtxPromptSelection {
@@ -166,6 +187,10 @@ class LtxPromptSelection {
     this.emotionId = 'fierce',
     this.powerId = 'medium',
     this.styleNote = 'manga style',
+    this.characterCustom = '',
+    this.motionCustom = '',
+    this.emotionCustom = '',
+    this.powerCustom = '',
   });
 
   final String characterId;
@@ -174,6 +199,10 @@ class LtxPromptSelection {
   final String powerId;
   /// Optional free-text style (e.g. "watercolor", "cyberpunk neon").
   final String styleNote;
+  final String characterCustom;
+  final String motionCustom;
+  final String emotionCustom;
+  final String powerCustom;
 
   LtxPromptSelection copyWith({
     String? characterId,
@@ -181,6 +210,10 @@ class LtxPromptSelection {
     String? emotionId,
     String? powerId,
     String? styleNote,
+    String? characterCustom,
+    String? motionCustom,
+    String? emotionCustom,
+    String? powerCustom,
   }) {
     return LtxPromptSelection(
       characterId: characterId ?? this.characterId,
@@ -188,6 +221,10 @@ class LtxPromptSelection {
       emotionId: emotionId ?? this.emotionId,
       powerId: powerId ?? this.powerId,
       styleNote: styleNote ?? this.styleNote,
+      characterCustom: characterCustom ?? this.characterCustom,
+      motionCustom: motionCustom ?? this.motionCustom,
+      emotionCustom: emotionCustom ?? this.emotionCustom,
+      powerCustom: powerCustom ?? this.powerCustom,
     );
   }
 
@@ -197,11 +234,51 @@ class LtxPromptSelection {
   LtxPowerLevel get power =>
       ltxPowers.firstWhere((p) => p.id == powerId, orElse: () => ltxPowers[1]);
 
+  String get characterPhrase {
+    if (characterId == 'custom') {
+      final custom = characterCustom.trim();
+      return custom.isNotEmpty ? custom : 'original character, clear silhouette';
+    }
+    return character.phrase;
+  }
+
+  String get motionPhrase {
+    if (motionId == 'custom') {
+      final custom = motionCustom.trim();
+      return custom.isNotEmpty ? custom : 'performs a clear readable action';
+    }
+    return motion.phrase;
+  }
+
+  String get emotionPhrase {
+    if (emotionId == 'custom') {
+      final custom = emotionCustom.trim();
+      return custom.isNotEmpty ? custom : 'expressive readable emotion';
+    }
+    return emotion.phrase;
+  }
+
+  String get powerIntensity {
+    if (powerId == 'custom') {
+      final custom = powerCustom.trim();
+      return custom.isNotEmpty ? custom : 'clear readable action';
+    }
+    return power.intensity;
+  }
+
+  String get powerFx {
+    if (powerId == 'custom') {
+      final custom = powerCustom.trim();
+      return custom.isNotEmpty ? custom : 'readable energy accents';
+    }
+    return power.fx;
+  }
+
   /// Auto-built prompt tuned for LTX + 1.47" desk readability.
   String build() {
     final style = styleNote.trim().isEmpty ? 'manga style' : styleNote.trim();
-    return '${character.phrase}, ${emotion.phrase}, ${motion.phrase}, '
-        '${power.intensity}, ${power.fx}, '
+    return '$characterPhrase, $emotionPhrase, $motionPhrase, '
+        '$powerIntensity, $powerFx, '
         'locked camera, simple uncluttered background, clear silhouette, '
         'readable on a tiny desk screen, $style';
   }
@@ -212,6 +289,10 @@ class LtxPromptSelection {
         'emotion': emotionId,
         'power': powerId,
         'style': styleNote,
+        'character_custom': characterCustom,
+        'motion_custom': motionCustom,
+        'emotion_custom': emotionCustom,
+        'power_custom': powerCustom,
       };
 
   static LtxPromptSelection fromPrefs(Map<String, String?> m) {
@@ -221,6 +302,10 @@ class LtxPromptSelection {
       emotionId: m['emotion'] ?? 'fierce',
       powerId: m['power'] ?? 'medium',
       styleNote: m['style'] ?? 'manga style',
+      characterCustom: m['character_custom'] ?? '',
+      motionCustom: m['motion_custom'] ?? '',
+      emotionCustom: m['emotion_custom'] ?? '',
+      powerCustom: m['power_custom'] ?? '',
     );
   }
 }

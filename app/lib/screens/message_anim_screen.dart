@@ -23,6 +23,10 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
   final _styleNote = TextEditingController(text: 'manga style');
   final _promptOverride = TextEditingController();
   final _title = TextEditingController();
+  final _characterCustom = TextEditingController();
+  final _motionCustom = TextEditingController();
+  final _emotionCustom = TextEditingController();
+  final _powerCustom = TextEditingController();
 
   late final TabController _tabs;
   LtxPromptSelection _sel = const LtxPromptSelection();
@@ -58,11 +62,21 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
         'emotion': prefs.getString('ltx_emotion'),
         'power': prefs.getString('ltx_power'),
         'style': prefs.getString('ltx_style'),
+        'character_custom': prefs.getString('ltx_character_custom'),
+        'motion_custom': prefs.getString('ltx_motion_custom'),
+        'emotion_custom': prefs.getString('ltx_emotion_custom'),
+        'power_custom': prefs.getString('ltx_power_custom'),
       });
       _styleNote.text = _sel.styleNote;
+      _characterCustom.text = _sel.characterCustom;
+      _motionCustom.text = _sel.motionCustom;
+      _emotionCustom.text = _sel.emotionCustom;
+      _powerCustom.text = _sel.powerCustom;
       _duration = prefs.getInt('ltx_duration') ?? 4;
       _promptOverride.text = _sel.build();
-      _title.text = _sel.motion.label;
+      _title.text = _sel.motionId == 'custom' && _sel.motionCustom.trim().isNotEmpty
+          ? _sel.motionCustom.trim().split(',').first
+          : _sel.motion.label;
     });
     await Future.wait([_refreshQuota(), _refreshGallery()]);
   }
@@ -75,6 +89,10 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
     await prefs.setString('ltx_emotion', m['emotion']!);
     await prefs.setString('ltx_power', m['power']!);
     await prefs.setString('ltx_style', m['style']!);
+    await prefs.setString('ltx_character_custom', m['character_custom']!);
+    await prefs.setString('ltx_motion_custom', m['motion_custom']!);
+    await prefs.setString('ltx_emotion_custom', m['emotion_custom']!);
+    await prefs.setString('ltx_power_custom', m['power_custom']!);
     await prefs.setInt('ltx_duration', _duration);
   }
 
@@ -113,14 +131,29 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
     }
   }
 
+  LtxPromptSelection _selWithCustoms() {
+    return _sel.copyWith(
+      styleNote: _styleNote.text,
+      characterCustom: _characterCustom.text,
+      motionCustom: _motionCustom.text,
+      emotionCustom: _emotionCustom.text,
+      powerCustom: _powerCustom.text,
+    );
+  }
+
   void _updateSel(LtxPromptSelection next) {
     setState(() {
       _sel = next;
       if (!_editPrompt) {
         _promptOverride.text = next.build();
       }
-      if (_title.text.trim().isEmpty || _title.text == _sel.motion.label) {
-        _title.text = next.motion.label;
+      final motionLabel = next.motionId == 'custom' && next.motionCustom.trim().isNotEmpty
+          ? next.motionCustom.trim().split(',').first
+          : next.motion.label;
+      if (_title.text.trim().isEmpty ||
+          _title.text == _sel.motion.label ||
+          _title.text == motionLabel) {
+        _title.text = motionLabel;
       }
     });
     _persistSel();
@@ -131,7 +164,7 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
       final t = _promptOverride.text.trim();
       if (t.isNotEmpty) return t;
     }
-    return _sel.copyWith(styleNote: _styleNote.text).build();
+    return _selWithCustoms().build();
   }
 
   Future<void> _pushFramesToDesk(List<Uint8List> frames, {int w = kAnimW, int h = kAnimH}) async {
@@ -238,6 +271,10 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
     _styleNote.dispose();
     _promptOverride.dispose();
     _title.dispose();
+    _characterCustom.dispose();
+    _motionCustom.dispose();
+    _emotionCustom.dispose();
+    _powerCustom.dispose();
     super.dispose();
   }
 
@@ -245,6 +282,31 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
     return Padding(
       padding: const EdgeInsets.only(top: 14, bottom: 8),
       child: Text(label, style: Theme.of(context).textTheme.titleMedium),
+    );
+  }
+
+  Widget _customField({
+    required TextEditingController controller,
+    required String hint,
+    required void Function(String) onChanged,
+    bool forceShow = false,
+  }) {
+    if (!forceShow && controller.text.trim().isEmpty) {
+      // Still show so user can type without selecting Custom first.
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: TextField(
+        controller: controller,
+        enabled: !_busy,
+        maxLines: 2,
+        decoration: InputDecoration(
+          hintText: hint,
+          labelText: 'Custom',
+          alignLabelWithHint: true,
+        ),
+        onChanged: onChanged,
+      ),
     );
   }
 
@@ -296,7 +358,7 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
 
   Widget _buildCreateTab() {
     final text = Theme.of(context).textTheme;
-    final live = _sel.copyWith(styleNote: _styleNote.text);
+    final live = _selWithCustoms();
     final canGenerate = !_busy && (_quota?.remaining ?? 1) > 0;
 
     return ListView(
@@ -313,19 +375,61 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
         _choiceChips(
           choices: ltxCharacters,
           selectedId: _sel.characterId,
-          onSelect: (id) => _updateSel(_sel.copyWith(characterId: id, styleNote: _styleNote.text)),
+          onSelect: (id) {
+            if (id != 'custom') _characterCustom.clear();
+            _updateSel(_selWithCustoms().copyWith(
+              characterId: id,
+              characterCustom: id == 'custom' ? _characterCustom.text : '',
+            ));
+          },
+        ),
+        _customField(
+          controller: _characterCustom,
+          hint: 'e.g. tiny raccoon astronaut with LED goggles',
+          forceShow: _sel.characterId == 'custom',
+          onChanged: (v) => _updateSel(
+            _selWithCustoms().copyWith(characterCustom: v, characterId: 'custom'),
+          ),
         ),
         _sectionTitle('Motion'),
         _choiceChips(
           choices: ltxMotions,
           selectedId: _sel.motionId,
-          onSelect: (id) => _updateSel(_sel.copyWith(motionId: id, styleNote: _styleNote.text)),
+          onSelect: (id) {
+            if (id != 'custom') _motionCustom.clear();
+            _updateSel(_selWithCustoms().copyWith(
+              motionId: id,
+              motionCustom: id == 'custom' ? _motionCustom.text : '',
+            ));
+          },
+        ),
+        _customField(
+          controller: _motionCustom,
+          hint: 'e.g. tosses a paper plane that glides past the camera',
+          forceShow: _sel.motionId == 'custom',
+          onChanged: (v) => _updateSel(
+            _selWithCustoms().copyWith(motionCustom: v, motionId: 'custom'),
+          ),
         ),
         _sectionTitle('Emotion'),
         _choiceChips(
           choices: ltxEmotions,
           selectedId: _sel.emotionId,
-          onSelect: (id) => _updateSel(_sel.copyWith(emotionId: id, styleNote: _styleNote.text)),
+          onSelect: (id) {
+            if (id != 'custom') _emotionCustom.clear();
+            _updateSel(_selWithCustoms().copyWith(
+              emotionId: id,
+              emotionCustom: id == 'custom' ? _emotionCustom.text : '',
+            ));
+          },
+        ),
+        _customField(
+          controller: _emotionCustom,
+          hint: 'e.g. soft hopeful smile, eyes sparkling',
+          forceShow: _sel.emotionId == 'custom',
+          onChanged: (v) => _updateSel(
+            _selWithCustoms().copyWith(emotionCustom: v, emotionId: 'custom'),
+          ),
         ),
         _sectionTitle('Power'),
         Wrap(
@@ -338,16 +442,30 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
                 selected: p.id == _sel.powerId,
                 onSelected: _busy
                     ? null
-                    : (_) => _updateSel(_sel.copyWith(powerId: p.id, styleNote: _styleNote.text)),
+                    : (_) {
+                        if (p.id != 'custom') _powerCustom.clear();
+                        _updateSel(_selWithCustoms().copyWith(
+                          powerId: p.id,
+                          powerCustom: p.id == 'custom' ? _powerCustom.text : '',
+                        ));
+                      },
               ),
           ],
+        ),
+        _customField(
+          controller: _powerCustom,
+          hint: 'e.g. soft pastel sparks, gentle breeze FX',
+          forceShow: _sel.powerId == 'custom',
+          onChanged: (v) => _updateSel(
+            _selWithCustoms().copyWith(powerCustom: v, powerId: 'custom'),
+          ),
         ),
         _sectionTitle('Art style'),
         TextField(
           controller: _styleNote,
           enabled: !_busy,
           decoration: const InputDecoration(hintText: 'manga style, watercolor, neon…'),
-          onChanged: (v) => _updateSel(_sel.copyWith(styleNote: v)),
+          onChanged: (v) => _updateSel(_selWithCustoms().copyWith(styleNote: v)),
         ),
         const SizedBox(height: 12),
         Row(

@@ -11,13 +11,16 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
-from .db import init_db
+from .db import SessionLocal, init_db
+from .routes_admin import ensure_admin_user, router as admin_router
 from .routes_auth import router as auth_router
 from .routes_ltx import router as ltx_router
 from .routes_me import router as me_router
 
 ROOT = Path(__file__).resolve().parents[1]
+ADMIN_HTML = Path(__file__).resolve().parent / "static" / "admin.html"
 
 
 def _load_dotenv() -> None:
@@ -36,12 +39,18 @@ def _load_dotenv() -> None:
 async def lifespan(_app: FastAPI):
     _load_dotenv()
     init_db()
+    assert SessionLocal is not None
+    db = SessionLocal()
+    try:
+        ensure_admin_user(db)
+    finally:
+        db.close()
     yield
 
 
 app = FastAPI(
     title="Deskbot Cloud",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -64,6 +73,14 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/v1")
 app.include_router(me_router, prefix="/v1")
 app.include_router(ltx_router, prefix="/v1")
+app.include_router(admin_router, prefix="/v1")
+
+
+@app.get("/admin", include_in_schema=False)
+def admin_dashboard():
+    if not ADMIN_HTML.is_file():
+        return {"detail": "Admin UI missing"}
+    return FileResponse(ADMIN_HTML, media_type="text/html")
 
 
 @app.get("/health")

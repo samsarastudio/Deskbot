@@ -28,6 +28,9 @@ class User(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # None = use global DAILY_LTX_LIMIT
+    daily_ltx_limit: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
 
 
 class LtxJob(Base):
@@ -60,11 +63,17 @@ SessionLocal = None
 def _migrate(engine) -> None:
     """Add columns introduced after first deploy (SQLite)."""
     with engine.begin() as conn:
-        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(ltx_jobs)")).fetchall()}
-        if "title" not in cols:
+        job_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(ltx_jobs)")).fetchall()}
+        if "title" not in job_cols:
             conn.execute(text("ALTER TABLE ltx_jobs ADD COLUMN title VARCHAR(160) DEFAULT ''"))
-        if "preview_path" not in cols:
+        if "preview_path" not in job_cols:
             conn.execute(text("ALTER TABLE ltx_jobs ADD COLUMN preview_path VARCHAR(512)"))
+
+        user_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()}
+        if "is_admin" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0"))
+        if "daily_ltx_limit" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN daily_ltx_limit INTEGER"))
 
 
 def init_db() -> None:

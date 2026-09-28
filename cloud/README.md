@@ -11,8 +11,23 @@ Flutter app  --JWT-->  deskbot.inmomentservices.com
                            |-- /v1/auth/register|login
                            |-- /v1/me
                            |-- /v1/ltx/jobs  → Comfy Cloud (server-side key)
+                           |-- /admin        → admin dashboard (set per-user daily limits)
                            `-- returns RGB565 frames for BLE upload
 ```
+
+## Admin dashboard
+
+1. Set in `.env`:
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` (creates/promotes that user as admin on boot)
+   - Optional: `ADMIN_PASSWORD_RESET=1` to reset password on next start
+2. Open `https://deskbot.inmomentservices.com/admin`
+3. Sign in → set each user’s **Daily limit** (empty = global `DAILY_LTX_LIMIT`)
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| POST | `/v1/admin/login` | no | admin JWT |
+| GET | `/v1/admin/users` | admin | list users + today’s usage |
+| PATCH | `/v1/admin/users/{id}` | admin | set `daily_ltx_limit` / `is_active` |
 
 ## Local run
 
@@ -50,7 +65,7 @@ cd ~
 git clone https://github.com/samsarastudio/Deskbot.git || (cd Deskbot && git pull)
 cd Deskbot/cloud
 cp .env.example .env
-nano .env   # JWT_SECRET=...  COMFY_API_KEY=comfyui-...
+nano .env   # JWT_SECRET=...  COMFY_API_KEY=...  ADMIN_EMAIL=...  ADMIN_PASSWORD=...
 
 # Docker (install docker.io first if needed)
 chmod +x deploy-pi.sh
