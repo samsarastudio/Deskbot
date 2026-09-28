@@ -166,7 +166,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             MaterialPageRoute(builder: (_) => const MessageAnimScreen()),
                           );
                         },
-                        child: const Text('LTX message'),
+                        child: const Text('LTX Studio'),
                       ),
                       OutlinedButton(
                         onPressed: () {

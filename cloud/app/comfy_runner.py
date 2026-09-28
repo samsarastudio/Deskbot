@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-import struct
 import subprocess
 import tempfile
 from pathlib import Path
@@ -44,11 +42,10 @@ def encode_frame_rgb565(im: Image.Image) -> bytes:
     return bytes(out)
 
 
-def frames_from_video(video_path: Path, duration_sec: int = 4) -> list[bytes]:
+def frames_from_video(video_path: Path, duration_sec: int = 4, preview_path: Path | None = None) -> list[bytes]:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=OUT_DIR) as td:
         pattern = str(Path(td) / "f_%02d.png")
-        # Sample ~6 frames across the clip
         fps = max(ANIM_MAX_FRAMES / max(duration_sec, 1), 0.5)
         cmd = [
             "ffmpeg",
@@ -68,10 +65,13 @@ def frames_from_video(video_path: Path, duration_sec: int = 4) -> list[bytes]:
         paths = sorted(Path(td).glob("f_*.png"))[:ANIM_MAX_FRAMES]
         if not paths:
             raise RuntimeError("No frames extracted from video")
+        if preview_path is not None:
+            preview_path.parent.mkdir(parents=True, exist_ok=True)
+            Image.open(paths[0]).convert("RGB").save(preview_path, format="PNG")
         return [encode_frame_rgb565(Image.open(p)) for p in paths]
 
 
-def run_ltx_job(prompt: str, duration_sec: int = 4, fps: int = 24) -> dict:
+def run_ltx_job(prompt: str, duration_sec: int = 4, fps: int = 24, job_id: str | None = None) -> dict:
     """Submit to Comfy Cloud, download video, return paths + RGB565 frames."""
     api_key = os.environ.get("COMFY_API_KEY", "").strip()
     if not api_key:
@@ -102,13 +102,18 @@ def run_ltx_job(prompt: str, duration_sec: int = 4, fps: int = 24) -> dict:
         raise RuntimeError("Comfy job returned no video outputs")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    dest = OUT_DIR / f"{getattr(job, 'id', 'ltx')}_{outputs[0].name}"
+    stem = job_id or str(getattr(job, "id", "ltx"))
+    raw_name = str(getattr(outputs[0], "name", "ltx.mp4") or "ltx.mp4")
+    safe_name = raw_name.replace("\\", "/").split("/")[-1] or "ltx.mp4"
+    dest = OUT_DIR / f"{stem}_{safe_name}"
+    preview = OUT_DIR / f"{stem}_preview.png"
     outputs[0].to_file(str(dest))
 
-    frames = frames_from_video(dest, duration_sec=duration_sec)
+    frames = frames_from_video(dest, duration_sec=duration_sec, preview_path=preview)
     return {
         "comfy_job_id": getattr(job, "id", None),
         "video_path": str(dest),
+        "preview_path": str(preview) if preview.is_file() else None,
         "frames": frames,
         "w": ANIM_W,
         "h": ANIM_H,
