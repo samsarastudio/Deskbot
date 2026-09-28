@@ -1,0 +1,18 @@
+# /etc/systemd/system/deskbot-cloud.service
+# Adjust User= and paths to your Pi user.
+
+[Unit]
+Description=Deskbot Cloud API
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Deskbot/cloud
+EnvironmentFile=/home/pi/Deskbot/cloud/.env
+ExecStart=/home/pi/Deskbot/cloud/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

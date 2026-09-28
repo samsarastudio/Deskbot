@@ -1,0 +1,6 @@
+# Caddy snippet — TLS for deskbot.inmomentservices.com → uvicorn/docker on :8000
+# Place in Caddyfile or import; Pi needs ports 80/443 forwarded.
+
+deskbot.inmomentservices.com {
+    reverse_proxy 127.0.0.1:8000
+}

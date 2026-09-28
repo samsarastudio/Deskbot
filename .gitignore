@@ -6,6 +6,8 @@ venv/
 .env
 tools/comfy/.env
 tools/comfy/out/
+cloud/.env
+cloud/data/
 *.db
 *.sqlite
 brain/data/

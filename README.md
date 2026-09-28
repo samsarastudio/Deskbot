@@ -13,6 +13,13 @@ Phone app (Flutter) + ESP32-C6 Deskbot (NimBLE). Wi‑Fi / PC brain stack is arc
 - [docs/BLE_Companion_SOW.md](docs/BLE_Companion_SOW.md) — full SOW
 - [docs/QA_MATRIX.md](docs/QA_MATRIX.md) — acceptance / test matrix
 
+## Cloud API (accounts + LTX)
+
+User login and Comfy generation live on **deskbot.inmomentservices.com** (`cloud/`).
+The phone app signs in with email/password; the server holds `COMFY_API_KEY`.
+
+See [cloud/README.md](cloud/README.md).
+
 ## Firmware
 
 ```powershell

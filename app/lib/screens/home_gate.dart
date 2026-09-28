@@ -2,17 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../ble/ble_controller.dart';
+import '../cloud/auth_controller.dart';
 import 'home_screen.dart';
+import 'login_screen.dart';
 import 'recovery_screen.dart';
 import 'search_screen.dart';
 import 'setup_screen.dart';
 import 'welcome_screen.dart';
 
+/// Cloud account first, then Deskbot BLE pairing / home.
 class HomeGate extends ConsumerWidget {
   const HomeGate({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final auth = ref.watch(authControllerProvider);
+    if (auth.phase == AuthPhase.loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (auth.phase == AuthPhase.signedOut) {
+      return const LoginScreen();
+    }
+
     final s = ref.watch(bleControllerProvider);
     final child = switch (s.phase) {
       BleLinkPhase.idle => const WelcomeScreen(),
@@ -42,7 +55,7 @@ class HomeGate extends ConsumerWidget {
         );
       },
       child: KeyedSubtree(
-        key: ValueKey(s.phase),
+        key: ValueKey('auth-${auth.phase}-ble-${s.phase}'),
         child: child,
       ),
     );

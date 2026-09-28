@@ -1,17 +1,17 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ble/ble_controller.dart';
-import '../comfy/comfy_ltx_service.dart';
-import '../comfy/comfy_settings.dart';
+import '../cloud/auth_controller.dart';
+import '../cloud/deskbot_cloud_api.dart';
 import '../comfy/ltx_prompt_builder.dart';
 import '../theme/nova_theme.dart';
 
-final comfySettingsProvider = Provider((_) => ComfySettings());
-final comfyLtxServiceProvider = Provider((_) => ComfyLtxService());
-
-/// App-side LTX message: pick style pieces → auto prompt → Comfy → desk.
+/// Pick style pieces → cloud LTX job → BLE frames to desk.
 class MessageAnimScreen extends ConsumerStatefulWidget {
   const MessageAnimScreen({super.key});
 
@@ -20,7 +20,6 @@ class MessageAnimScreen extends ConsumerStatefulWidget {
 }
 
 class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> {
-  final _apiKey = TextEditingController();
   final _styleNote = TextEditingController(text: 'manga style');
   final _promptOverride = TextEditingController();
 
@@ -37,11 +36,9 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> {
   }
 
   Future<void> _restore() async {
-    final key = await ref.read(comfySettingsProvider).loadApiKey();
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
-      if (key != null) _apiKey.text = key;
       _sel = LtxPromptSelection.fromPrefs({
         'character': prefs.getString('ltx_character'),
         'motion': prefs.getString('ltx_motion'),
@@ -86,25 +83,16 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> {
 
   @override
   void dispose() {
-    _apiKey.dispose();
     _styleNote.dispose();
     _promptOverride.dispose();
     super.dispose();
   }
 
-  Future<void> _saveKey() async {
-    await ref.read(comfySettingsProvider).saveApiKey(_apiKey.text);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Comfy key saved on phone')),
-    );
-  }
-
   Future<void> _generateAndPush() async {
-    final key = _apiKey.text.trim();
-    if (key.isEmpty) {
+    final token = ref.read(authControllerProvider.notifier).token;
+    if (token == null || token.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Paste your Comfy Cloud API key first')),
+        const SnackBar(content: Text('Sign in required')),
       );
       return;
     }
@@ -122,20 +110,35 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> {
 
     setState(() {
       _busy = true;
-      _stage = 'Starting…';
+      _stage = 'Starting cloud job…';
     });
 
     try {
-      await ref.read(comfySettingsProvider).saveApiKey(key);
       await _persistSel();
-      final frames = await ref.read(comfyLtxServiceProvider).generateDeskFrames(
-            apiKey: key,
-            prompt: prompt,
-            durationSec: _duration,
-            onProgress: (s) {
-              if (mounted) setState(() => _stage = s);
-            },
-          );
+      final api = ref.read(deskbotCloudApiProvider);
+      final created = await api.createLtxJob(
+        token,
+        prompt: prompt,
+        durationSec: _duration,
+      );
+      final jobId = created['id']?.toString();
+      if (jobId == null) throw CloudApiException('No job id returned');
+
+      final job = await api.waitLtxJob(
+        token,
+        jobId,
+        onStatus: (s) {
+          if (mounted) setState(() => _stage = 'Cloud: $s…');
+        },
+      );
+
+      final list = job['frames_b64'];
+      if (list is! List || list.isEmpty) {
+        throw CloudApiException('Job succeeded but no frames returned');
+      }
+      final frames = <Uint8List>[
+        for (final item in list) Uint8List.fromList(base64Decode(item.toString())),
+      ];
 
       setState(() => _stage = 'Sending to Deskbot…');
       await ble.pushLayout(eyes: false, clock: 'off');
@@ -187,6 +190,7 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final live = _sel.copyWith(styleNote: _styleNote.text);
+    final user = ref.watch(authControllerProvider).user;
 
     return Scaffold(
       appBar: AppBar(
@@ -198,21 +202,8 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> {
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           children: [
             Text(
-              'Pick character, motion, emotion, and power — the app writes the Comfy prompt.',
+              'Signed in as ${user?.email ?? "…"}. Generation runs on deskbot.inmomentservices.com.',
               style: text.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _apiKey,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Comfy Cloud API key',
-                hintText: 'comfyui-…',
-              ),
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(onPressed: _busy ? null : _saveKey, child: const Text('Save key')),
             ),
             _sectionTitle('Character'),
             _choiceChips(
@@ -254,9 +245,7 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> {
               decoration: const InputDecoration(
                 hintText: 'manga style, watercolor, neon cyberpunk…',
               ),
-              onChanged: (v) {
-                _updateSel(_sel.copyWith(styleNote: v));
-              },
+              onChanged: (v) => _updateSel(_sel.copyWith(styleNote: v)),
             ),
             const SizedBox(height: 12),
             Row(

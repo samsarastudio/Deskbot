@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../ble/ble_controller.dart';
+import '../screens/account_screen.dart';
 import '../screens/layout_editor_screen.dart';
 import '../screens/message_anim_screen.dart';
 import '../sync/rssi_filter.dart';
@@ -117,6 +118,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ProximityBand.away => 'Away',
                       },
                       good: s.proximity != ProximityBand.away,
+                    ),
+                    IconButton(
+                      tooltip: 'Account',
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const AccountScreen()),
+                        );
+                      },
+                      icon: const Icon(Icons.person_outline),
                     ),
                   ],
                 ),
