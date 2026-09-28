@@ -1031,7 +1031,7 @@ esp_err_t face_init(void)
     s_state = FACE_OFFLINE;
     rgb(12, 4, 0);
 
-    /* Cinema mode: latest LTX Comfy clip, no eyes / no clock. */
+    /* Cinema mode: latest live LTX clip from cloud, no eyes / no clock. */
     s_eyes_on = false;
     s_clock_place = 0;
     desk_persist_save_layout(false, 0);
@@ -1052,7 +1052,7 @@ esp_err_t face_init(void)
         s_anim_next_us = esp_timer_get_time();
         s_scenery_ready = false;
         desk_persist_save_anim(s_anim, s_anim_w, s_anim_h, s_anim_n, s_anim_fps);
-        ESP_LOGI(TAG, "boot LTX kamehameha %dx%d x%d", s_anim_w, s_anim_h, s_anim_n);
+        ESP_LOGI(TAG, "boot LTX live %dx%d x%d", s_anim_w, s_anim_h, s_anim_n);
     }
 
     xTaskCreate(render_task, "face", 10240, NULL, 6, NULL);

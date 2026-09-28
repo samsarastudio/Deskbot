@@ -122,7 +122,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                'Animations are generated on deskbot.inmomentservices.com — your Comfy key stays on the server.',
+                'Animations are generated on deskbot.inmomentservices.com — 3 per day, saved in your gallery.',
                 textAlign: TextAlign.center,
                 style: text.bodySmall,
               ),
