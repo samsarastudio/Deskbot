@@ -47,6 +47,12 @@ flutter run
 
 `flutter create .` merges platform folders; keep the permissions already in `android/app/src/main/AndroidManifest.xml`.
 
+### Builds
+
+- **Android (this PC):** `tools/publish_mobile.ps1` → `dist/NOVA-android.apk`
+- **iOS (Codemagic):** workflow **iOS Sideload IPA (unsigned)** in `codemagic.yaml` → download `NOVA-ios-unsigned.ipa` → install with [Sideloadly](https://sideloadly.io)
+- App talks to `https://deskbot.inmomentservices.com` (override with `--dart-define=DESKBOT_API_BASE=...`)
+
 ### First-time flow
 
 1. Grant Bluetooth permission in-app  

@@ -15,7 +15,8 @@ echo "== Android arm64 release =="
 (
   cd "$APP"
   flutter pub get
-  flutter build apk --release --split-per-abi
+  flutter build apk --release --split-per-abi \
+    --dart-define=DESKBOT_API_BASE="${DESKBOT_API_BASE:-https://deskbot.inmomentservices.com}"
 )
 APK="$APP/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
 cp -f "$APK" "$DIST/NOVA-android.apk"
@@ -27,17 +28,17 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   echo "== iOS IPA =="
   (
     cd "$APP"
-    flutter build ipa --release --export-options-plist=ios/ExportOptions.plist
+    flutter build ipa --release --export-options-plist=ios/ExportOptions.plist \
+      --dart-define=DESKBOT_API_BASE="${DESKBOT_API_BASE:-https://deskbot.inmomentservices.com}"
   )
   IPA="$(ls "$APP"/build/ios/ipa/*.ipa | head -n1)"
-  cp -f "$IPA" "$DIST/NOVA-ios.apk.ipa"
   cp -f "$IPA" "$DIST/NOVA-ios.ipa"
   IOS_URL="$(upload "$DIST/NOVA-ios.ipa")"
   echo "iOS: $IOS_URL"
 else
-  echo "Skipping iOS IPA (needs macOS + Xcode + Apple signing)."
+  echo "Skipping iOS IPA (needs macOS + Xcode)."
+  echo "Or build unsigned IPA on Codemagic: workflow ios-sideload-test → Sideloadly."
 fi
-
 cat > "$DIST/INSTALL.md" <<EOF
 # NOVA install links
 

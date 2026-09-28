@@ -3,6 +3,7 @@
 # Free personal accounts: 500 macOS M2 minutes/month
 #
 # iOS workflow builds an unsigned IPA for Sideloadly (Windows re-signs with free Apple ID).
+# Includes live cloud API + LTX Studio (128×68 × 12 anim frames).
 
 workflows:
   ios-sideload-test:
@@ -12,17 +13,24 @@ workflows:
     environment:
       flutter: stable
       xcode: latest
+      cocoapods: default
       vars:
         APP_DIR: app
+        DESKBOT_API_BASE: https://deskbot.inmomentservices.com
     scripts:
       - name: Get Flutter packages
         script: |
           cd $APP_DIR
           flutter pub get
+      - name: Install CocoaPods
+        script: |
+          cd $APP_DIR/ios
+          pod install
       - name: Build iOS (no codesign)
         script: |
           cd $APP_DIR
-          flutter build ios --release --no-codesign
+          flutter build ios --release --no-codesign \
+            --dart-define=DESKBOT_API_BASE="$DESKBOT_API_BASE"
       - name: Package unsigned IPA for Sideloadly
         script: |
           set -e
@@ -38,8 +46,12 @@ workflows:
           cd "$STAGE"
           zip -qry "$CM_BUILD_DIR/NOVA-ios-unsigned.ipa" Payload
           ls -lh "$CM_BUILD_DIR/NOVA-ios-unsigned.ipa"
+          # Also keep a versioned copy for artifact clarity
+          VER="$(grep '^version:' "$CM_BUILD_DIR/$APP_DIR/pubspec.yaml" | head -1 | awk '{print $2}' | tr -d '"' | tr '+' '-')"
+          cp "$CM_BUILD_DIR/NOVA-ios-unsigned.ipa" "$CM_BUILD_DIR/NOVA-ios-${VER}-unsigned.ipa" || true
     artifacts:
       - NOVA-ios-unsigned.ipa
+      - NOVA-ios-*-unsigned.ipa
 
   android-debug-test:
     name: Android Debug APK
@@ -49,6 +61,7 @@ workflows:
       flutter: stable
       vars:
         APP_DIR: app
+        DESKBOT_API_BASE: https://deskbot.inmomentservices.com
     scripts:
       - name: Get packages
         script: |
@@ -57,6 +70,10 @@ workflows:
       - name: Build debug APK
         script: |
           cd $APP_DIR
-          flutter build apk --debug
+          flutter build apk --debug \
+            --dart-define=DESKBOT_API_BASE="$DESKBOT_API_BASE"
+          mkdir -p "$CM_BUILD_DIR"
+          cp build/app/outputs/flutter-apk/app-debug.apk "$CM_BUILD_DIR/NOVA-companion.apk"
     artifacts:
+      - NOVA-companion.apk
       - app/build/app/outputs/flutter-apk/app-debug.apk

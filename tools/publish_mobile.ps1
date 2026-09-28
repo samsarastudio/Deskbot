@@ -18,7 +18,8 @@ Write-Host "== Android arm64 release =="
 Push-Location $App
 try {
   flutter pub get
-  flutter build apk --release --split-per-abi
+  flutter build apk --release --split-per-abi `
+    --dart-define=DESKBOT_API_BASE=https://deskbot.inmomentservices.com
 } finally {
   Pop-Location
 }
@@ -60,8 +61,8 @@ $androidEsc = $androidUrl.Replace("&", "&amp;")
   '<h1>NOVA</h1>',
   '<p>Install the Deskbot companion on your phone.</p>',
   ('<a class="btn" href="{0}">Install Android APK</a>' -f $androidEsc),
-  '<a class="btn secondary disabled" href="#">iOS IPA — needs Mac build</a>',
-  '<small>Android: open in Chrome and allow unknown apps. iOS requires a signed IPA from macOS + Xcode (Apple Team ID in app/ios/ExportOptions.plist), then re-run tools/publish_mobile.sh.</small>',
+  '<a class="btn secondary disabled" href="#">iOS IPA — Codemagic + Sideloadly</a>',
+  '<small>Android: open in Chrome and allow unknown apps. iOS: run Codemagic workflow &quot;iOS Sideload IPA (unsigned)&quot;, download NOVA-ios-unsigned.ipa, install with Sideloadly.</small>',
   '</main>',
   '</body>',
   '</html>'
@@ -83,13 +84,11 @@ $pageUrl
 - APK (arm64): $androidUrl
 
 ## iOS
-- Not available from this Windows PC.
-- On a Mac:
-  1. Set Team ID in ``app/ios/ExportOptions.plist``
-  2. Run ``bash tools/publish_mobile.sh``
-  3. Share the printed iOS + page URLs
+- Codemagic: start workflow **iOS Sideload IPA (unsigned)** → download ``NOVA-ios-unsigned.ipa`` → Sideloadly
+- Or on a Mac: set Team ID in ``app/ios/ExportOptions.plist``, run ``bash tools/publish_mobile.sh``
 "@
 Set-Content -Encoding utf8 -Path (Join-Path $Dist "INSTALL.md") -Value $md
 
 Write-Host "Install page: $pageUrl"
 Write-Host "Android: $androidUrl"
+Write-Host "iOS: Codemagic workflow ios-sideload-test (unsigned IPA + Sideloadly)"

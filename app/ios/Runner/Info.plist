@@ -34,6 +34,10 @@
 	<string>NOVA shows your next calendar event on the Deskbot screen.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>NOVA uploads a scenery photo to your Deskbot background.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>NOVA may save generated preview images to your library.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
