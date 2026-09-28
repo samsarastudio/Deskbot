@@ -625,6 +625,7 @@ class BleController extends StateNotifier<BleUiState> {
     int fps = kAnimFps,
     int w = kAnimW,
     int h = kAnimH,
+    void Function(int done, int total)? onProgress,
   }) async {
     final sync = _sync;
     if (sync == null || !sync.authed) {
@@ -633,7 +634,7 @@ class BleController extends StateNotifier<BleUiState> {
     if (frames.isEmpty) {
       throw StateError('No animation frames');
     }
-    await sync.uploadAnimFrames(frames, w: w, h: h, fps: fps);
+    await sync.uploadAnimFrames(frames, w: w, h: h, fps: fps, onProgress: onProgress);
   }
 
   Future<void> uploadScenery(Uint8List imageBytes) async {

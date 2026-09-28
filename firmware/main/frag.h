@@ -12,7 +12,7 @@ typedef struct {
     uint16_t msg_id;
     uint16_t next_index;
     size_t len;
-    uint8_t buf[2048];
+    uint8_t buf[4096];
     bool active;
 } frag_rx_t;
 

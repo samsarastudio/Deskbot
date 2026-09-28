@@ -174,7 +174,18 @@ class _MessageAnimScreenState extends ConsumerState<MessageAnimScreen> with Sing
       throw StateError('Connect to Deskbot first');
     }
     await ble.pushLayout(eyes: false, clock: 'off');
-    await ble.uploadAnimFrames(frames, fps: kAnimFps, w: w, h: h);
+    if (mounted) setState(() => _stage = 'Sending to Deskbot… 0%');
+    await ble.uploadAnimFrames(
+      frames,
+      fps: kAnimFps,
+      w: w,
+      h: h,
+      onProgress: (done, total) {
+        if (!mounted || total <= 0) return;
+        final pct = ((done * 100) / total).clamp(0, 100).round();
+        setState(() => _stage = 'Sending to Deskbot… $pct%');
+      },
+    );
   }
 
   Future<void> _generateAndPush() async {

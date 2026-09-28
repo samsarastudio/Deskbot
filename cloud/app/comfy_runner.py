@@ -21,7 +21,7 @@ NODE_SAVE_VIDEO = "75"
 
 ANIM_W = 128
 ANIM_H = 68
-ANIM_MAX_FRAMES = 12
+ANIM_MAX_FRAMES = 8
 
 
 def _rgb565(r: int, g: int, b: int) -> int:

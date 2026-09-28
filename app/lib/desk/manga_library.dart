@@ -6,7 +6,7 @@ import 'scenery_encode.dart';
 
 const int kAnimW = 128;
 const int kAnimH = 68;
-const int kAnimMaxFrames = 12;
+const int kAnimMaxFrames = 8;
 const int kAnimFps = 10;
 
 class MangaLibraryItem {

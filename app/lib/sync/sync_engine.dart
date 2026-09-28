@@ -28,6 +28,8 @@ class SyncEngine {
   int authFailures;
   bool _authInFlight = false;
   Completer<bool>? _displayAck;
+  /// True while streaming scenery/anim chunks — stray ACK/NACK must not touch auth.
+  bool _mediaTransfer = false;
 
   Future<void> sendHello() async {
     await sendJson(envelopeJson('HELLO', {
@@ -71,15 +73,17 @@ class SyncEngine {
     await sendJson(envelopeJson('DISPLAY', body));
   }
 
-  Future<bool> sendDisplayWait(Map<String, dynamic> body) async {
+  Future<bool> sendDisplayWait(
+    Map<String, dynamic> body, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
     if (!authed) return false;
+    // Let any prior fire-and-forget ACK arrive before we arm the completer.
+    await Future<void>.delayed(const Duration(milliseconds: 60));
     _displayAck = Completer<bool>();
     try {
       await sendJson(envelopeJson('DISPLAY', body));
-      return await _displayAck!.future.timeout(
-        const Duration(seconds: 2),
-        onTimeout: () => false,
-      );
+      return await _displayAck!.future.timeout(timeout, onTimeout: () => false);
     } finally {
       _displayAck = null;
     }
@@ -108,7 +112,7 @@ class SyncEngine {
   }
 
   Future<void> pushLayout({required bool eyes, required String clock}) {
-    return sendDisplay({
+    return sendDisplayWait({
       'op': 'layout',
       'eyes': eyes,
       'clock': clock,
@@ -128,64 +132,90 @@ class SyncEngine {
     if (!authed) {
       throw StateError('Not linked — reconnect first');
     }
-    final began = await sendDisplayWait({'op': 'scenery_begin', 'w': w, 'h': h, 'fmt': 'rgb565'});
-    if (!began) {
-      throw StateError('Deskbot rejected scenery (need more RAM?)');
-    }
+    _mediaTransfer = true;
+    try {
+      final began = await sendDisplayWait({'op': 'scenery_begin', 'w': w, 'h': h, 'fmt': 'rgb565'});
+      if (!began) {
+        throw StateError('Deskbot rejected scenery (need more RAM?)');
+      }
 
-    // Stream chunks fast — ACK only begin + end (avoids multi-minute hangs).
-    const chunk = 720;
-    for (var off = 0; off < pixels.length; off += chunk) {
-      final end = math.min(off + chunk, pixels.length);
-      final slice = pixels.sublist(off, end);
-      await sendDisplay({
-        'op': 'scenery_chunk',
-        'off': off,
-        'data': base64Encode(slice),
-      });
-      await Future<void>.delayed(const Duration(milliseconds: 28));
-    }
+      // Chunks are silent on the desk (no ACK) — pace writes so BLE/frag stay intact.
+      const chunk = 480;
+      for (var off = 0; off < pixels.length; off += chunk) {
+        final end = math.min(off + chunk, pixels.length);
+        final slice = pixels.sublist(off, end);
+        await sendDisplay({
+          'op': 'scenery_chunk',
+          'off': off,
+          'data': base64Encode(slice),
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 36));
+      }
 
-    final ended = await sendDisplayWait({'op': 'scenery_end'});
-    if (!ended) {
-      throw StateError('Scenery commit failed');
+      final ended = await sendDisplayWait({'op': 'scenery_end'});
+      if (!ended) {
+        throw StateError('Scenery commit failed');
+      }
+    } finally {
+      _mediaTransfer = false;
     }
   }
 
-  Future<void> uploadAnimFrames(List<Uint8List> frames, {required int w, required int h, int fps = 10}) async {
+  Future<void> uploadAnimFrames(
+    List<Uint8List> frames, {
+    required int w,
+    required int h,
+    int fps = 10,
+    void Function(int done, int total)? onProgress,
+  }) async {
     if (!authed) {
       throw StateError('Not linked — reconnect first');
     }
     if (frames.isEmpty) {
       throw StateError('No frames');
     }
-    final began = await sendDisplayWait({
-      'op': 'anim_begin',
-      'w': w,
-      'h': h,
-      'frames': frames.length,
-      'fps': fps,
-    });
-    if (!began) {
-      throw StateError('Deskbot rejected animation');
-    }
-    const chunk = 720;
-    for (var fi = 0; fi < frames.length; fi++) {
-      final pixels = frames[fi];
-      for (var off = 0; off < pixels.length; off += chunk) {
-        final end = math.min(off + chunk, pixels.length);
-        await sendDisplay({
-          'op': 'anim_chunk',
-          'frame': fi,
-          'off': off,
-          'data': base64Encode(pixels.sublist(off, end)),
-        });
-        await Future<void>.delayed(const Duration(milliseconds: 24));
+    _mediaTransfer = true;
+    try {
+      final began = await sendDisplayWait({
+        'op': 'anim_begin',
+        'w': w,
+        'h': h,
+        'frames': frames.length,
+        'fps': fps,
+      }, timeout: const Duration(seconds: 12));
+      if (!began) {
+        throw StateError('Deskbot rejected animation (too large for desk RAM?)');
       }
-    }
-    final ended = await sendDisplayWait({'op': 'anim_end'});
-    if (!ended) {
-      throw StateError('Animation commit failed');
+
+      // Chunks are silent on the desk — keep payload under frag buffer (2KB JSON).
+      const chunk = 480;
+      var sent = 0;
+      final totalBytes = frames.fold<int>(0, (a, f) => a + f.length);
+      for (var fi = 0; fi < frames.length; fi++) {
+        final pixels = frames[fi];
+        for (var off = 0; off < pixels.length; off += chunk) {
+          final end = math.min(off + chunk, pixels.length);
+          await sendDisplay({
+            'op': 'anim_chunk',
+            'frame': fi,
+            'off': off,
+            'data': base64Encode(pixels.sublist(off, end)),
+          });
+          sent += end - off;
+          onProgress?.call(sent, totalBytes);
+          await Future<void>.delayed(const Duration(milliseconds: 36));
+        }
+      }
+
+      final ended = await sendDisplayWait(
+        {'op': 'anim_end'},
+        timeout: const Duration(seconds: 12),
+      );
+      if (!ended) {
+        throw StateError('Animation commit failed');
+      }
+    } finally {
+      _mediaTransfer = false;
     }
   }
 
@@ -225,6 +255,8 @@ class SyncEngine {
           _completeDisplay(true);
           return null;
         }
+        // Ignore layout/chunk ACKs during media push — do not re-enter link UI.
+        if (_mediaTransfer) return null;
         final wasAuthed = authed;
         authed = true;
         authFailures = 0;
@@ -238,6 +270,7 @@ class SyncEngine {
           _completeDisplay(false);
           return null;
         }
+        if (_mediaTransfer) return null;
         authed = false;
         authFailures++;
         // At most one automatic retry — never loop forever.

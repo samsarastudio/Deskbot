@@ -269,22 +269,22 @@ static void handle_display(cJSON *body)
         const cJSON *off = cJSON_GetObjectItem(body, "off");
         const cJSON *data = cJSON_GetObjectItem(body, "data");
         if (!cJSON_IsNumber(frame) || !cJSON_IsNumber(off) || !cJSON_IsString(data)) {
-            send_ack(NULL, false);
             return;
         }
         size_t b64_len = strlen(data->valuestring);
         size_t olen = (b64_len / 4) * 3 + 4;
         uint8_t *buf = malloc(olen);
         if (!buf) {
-            send_ack(NULL, false);
             return;
         }
         size_t written = 0;
         int rc = mbedtls_base64_decode(buf, olen, &written,
                                        (const unsigned char *)data->valuestring, b64_len);
-        bool ok = (rc == 0) && face_anim_write_frame((int)frame->valuedouble, (size_t)off->valuedouble, buf, written);
+        if (rc == 0) {
+            face_anim_write_frame((int)frame->valuedouble, (size_t)off->valuedouble, buf, written);
+        }
         free(buf);
-        send_ack(NULL, ok);
+        /* No ACK — app paces chunks; ACKing every piece races begin/end waits. */
     } else if (!strcmp(op->valuestring, "anim_end")) {
         face_anim_commit();
         send_ack(NULL, true);
@@ -331,7 +331,6 @@ static void handle_display(cJSON *body)
         const cJSON *off = cJSON_GetObjectItem(body, "off");
         const cJSON *data = cJSON_GetObjectItem(body, "data");
         if (!cJSON_IsNumber(off) || !cJSON_IsString(data) || !data->valuestring) {
-            send_ack(NULL, false);
             return;
         }
         size_t b64_len = strlen(data->valuestring);
@@ -339,19 +338,19 @@ static void handle_display(cJSON *body)
         uint8_t *buf = malloc(olen);
         if (!buf) {
             ESP_LOGE(TAG, "scenery chunk OOM");
-            send_ack(NULL, false);
             return;
         }
         size_t written = 0;
         int rc = mbedtls_base64_decode(buf, olen, &written,
                                        (const unsigned char *)data->valuestring, b64_len);
-        bool ok = (rc == 0) && face_scenery_write((size_t)off->valuedouble, buf, written);
-        if (!ok) {
-            ESP_LOGW(TAG, "scenery chunk fail off=%u len=%u rc=%d",
-                     (unsigned)off->valuedouble, (unsigned)written, rc);
+        if (rc == 0) {
+            if (!face_scenery_write((size_t)off->valuedouble, buf, written)) {
+                ESP_LOGW(TAG, "scenery chunk fail off=%u len=%u",
+                         (unsigned)off->valuedouble, (unsigned)written);
+            }
         }
         free(buf);
-        send_ack(NULL, ok);
+        /* No ACK — same reason as anim_chunk. */
     } else if (!strcmp(op->valuestring, "scenery_end")) {
         face_scenery_commit();
         send_ack(NULL, true);
